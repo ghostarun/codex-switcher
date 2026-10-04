@@ -6,26 +6,43 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { AntigravityQuota, type AntigravityModelQuota } from './AntigravityQuota';
 import { AgyRelayModelQuotas, RelayQuotaWindows } from './RelayQuotaWindows';
 import { relayCurrentState } from '../utils/relayCurrent';
+import { displayQuotaLabel, displayResetText } from '../utils/englishQuotaText';
 import { ReferralInviteModal } from './ReferralInviteModal';
 
 const KIND_BADGE: Record<ReturnType<typeof effectiveKind>, { label: string; className: string }> = {
-    chatgpt_oauth: { label: '订阅', className: 'badge kind-chatgpt' },
+    chatgpt_oauth: { label: 'Sub', className: 'badge kind-chatgpt' },
     openai_key: { label: 'API', className: 'badge kind-openai' },
-    relay: { label: '中转', className: 'badge kind-relay' },
+    relay: { label: 'Relay', className: 'badge kind-relay' },
     antigravity_oauth: { label: 'Google', className: 'badge kind-antigravity' },
 };
 
-/** Relay 类账号在 row 上展示哪个标签。新字段 `relay_category` 是权威来源，
- * 缺失时回退到通用"中转"。 */
+const WIDGET_EMOJIS = [
+    { value: '📱', label: '📱 Phone' },
+    { value: '⭐', label: '⭐ Star' },
+    { value: '⚡', label: '⚡ Bolt' },
+    { value: '🌙', label: '🌙 Moon' },
+    { value: '🔥', label: '🔥 Fire' },
+    { value: '🚀', label: '🚀 Rocket' },
+    { value: '🧠', label: '🧠 Brain' },
+    { value: '💎', label: '💎 Diamond' },
+    { value: '🟢', label: '🟢 Green' },
+    { value: '🔵', label: '🔵 Blue' },
+    { value: '🟣', label: '🟣 Purple' },
+    { value: '🟠', label: '🟠 Orange' },
+    { value: '🌸', label: '🌸 Flower' },
+    { value: '🐼', label: '🐼 Panda' },
+];
+
+/** Relay row badge: `relay_category` is authoritative; falls back to generic "Relay". */
 function relayCategoryBadge(account: Account): { label: string; className: string } {
     switch (account.relay_category) {
         case 'coding_plan':
             return { label: 'Plan', className: 'badge kind-codingplan' };
         case 'third_party':
-            return { label: '三方', className: 'badge kind-thirdparty' };
+            return { label: '3rd', className: 'badge kind-thirdparty' };
         case 'aggregator':
         default:
-            return { label: '中转', className: 'badge kind-relay' };
+            return { label: 'Relay', className: 'badge kind-relay' };
     }
 }
 
@@ -40,7 +57,7 @@ function antigravityTier(account: Account): { label: string; className: string }
     if (tier?.includes('pro')) return { label: 'PRO', className: 'badge google-tier google-tier-pro' };
     if (tier?.includes('plus')) return { label: 'PLUS', className: 'badge google-tier google-tier-pro' };
     if (tier === 'free' || tier?.includes('starter')) return { label: 'FREE', className: 'badge google-tier google-tier-free' };
-    return { label: '套餐待同步', className: 'badge google-tier google-tier-unknown' };
+    return { label: 'Plan pending sync', className: 'badge google-tier google-tier-unknown' };
 }
 
 function antigravityQuotaUpdatedAt(account: Account): string | undefined {
@@ -53,15 +70,15 @@ import { useShortCountdown } from '../hooks/useCountdown';
 import './AccountList.css';
 import { ConfirmModal } from './ConfirmModal';
 
-/** 把 Unix 秒到期时间格式化成本地短时间，如 "07-18 00:34" */
+/** Format Unix expiry seconds as local short time e.g. "07-18 00:34" */
 function fmtExpiry(ts?: number | null): string {
-    if (!ts || ts <= 0) return '未知';
+    if (!ts || ts <= 0) return 'Unknown';
     return new Date(ts * 1000).toLocaleString(undefined, {
         month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
     });
 }
 
-/** 距到期还剩多少天（向下取整，过期返回 0；无时间返回 null） */
+/** Days until expiry (floor; 0 if expired; null if none) */
 function daysLeft(ts?: number | null): number | null {
     if (!ts || ts <= 0) return null;
     return Math.max(0, Math.floor((ts - Math.floor(Date.now() / 1000)) / 86400));
@@ -74,21 +91,21 @@ type AccountExpiryInfo = {
     title: string;
 };
 
-/** 手工账号到期日按本地自然日计算；到期当天仍显示“今天到期”。 */
+/** Manual expiry uses local calendar day; expiry day shows as "expires today". */
 function accountExpiryInfo(value?: string | null): AccountExpiryInfo {
     if (!value) {
-        return { text: '未设置', badge: null, tone: 'unset', title: '点击设置账号到期日' };
+        return { text: 'Not set', badge: null, tone: 'unset', title: 'Click to set account expiry date' };
     }
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
     if (!match) {
-        return { text: value, badge: '日期异常', tone: 'expired', title: '日期格式异常，点击修正' };
+        return { text: value, badge: 'Invalid date', tone: 'expired', title: 'Bad date format — click to fix' };
     }
     const year = Number(match[1]);
     const month = Number(match[2]);
     const day = Number(match[3]);
     const parsed = new Date(Date.UTC(year, month - 1, day));
     if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
-        return { text: value, badge: '日期异常', tone: 'expired', title: '日期内容异常，点击修正' };
+        return { text: value, badge: 'Invalid date', tone: 'expired', title: 'Bad date value — click to fix' };
     }
     const now = new Date();
     const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
@@ -96,15 +113,15 @@ function accountExpiryInfo(value?: string | null): AccountExpiryInfo {
     const remainingDays = Math.round((expiryUtc - todayUtc) / 86_400_000);
 
     if (remainingDays < 0) {
-        return { text: `${value} · 已过期`, badge: '账号已到期', tone: 'expired', title: `账号于 ${value} 到期，点击修改` };
+        return { text: `${value} · expired`, badge: 'Account expired', tone: 'expired', title: `Expired on ${value} — click to edit` };
     }
     if (remainingDays === 0) {
-        return { text: `${value} · 今天`, badge: '今天到期', tone: 'soon', title: '账号今天到期，点击修改' };
+        return { text: `${value} · today`, badge: 'Expires today', tone: 'soon', title: 'Expires today — click to edit' };
     }
     if (remainingDays <= 7) {
-        return { text: `${value} · ${remainingDays}天`, badge: `${remainingDays}天到期`, tone: 'soon', title: `账号还有 ${remainingDays} 天到期，点击修改` };
+        return { text: `${value} · ${remainingDays}d`, badge: `${remainingDays}d left`, tone: 'soon', title: `${remainingDays} day(s) left — click to edit` };
     }
-    return { text: value, badge: null, tone: 'normal', title: `账号到期日 ${value}，点击修改` };
+    return { text: value, badge: null, tone: 'normal', title: `Expiry ${value} — click to edit` };
 }
 
 function primingWindowKind(account: Account): 'five_hour' | 'weekly' {
@@ -130,10 +147,10 @@ interface ResetCreditResult {
     upstream_raw: string;
 }
 
-// 一条可用的「主动重置次数」（来自 GET wham/rate-limit-reset-credits）
+// Manual reset credit from GET wham/rate-limit-reset-credits
 interface ResetCreditItem {
     id: string;
-    expires_at?: number | null; // Unix 秒
+    expires_at?: number | null; // Unix seconds
     granted_at?: number | null;
     title: string;
     source: string;
@@ -191,6 +208,8 @@ export function AccountList({
     const [copiedId, setCopiedId] = useState<string | null>(null);
     const [switchingIds, setSwitchingIds] = useState<Set<string>>(new Set());
     const [usageMap, setUsageMap] = useState<Record<string, UsageData>>({});
+    const [desktopUsage, setDesktopUsage] = useState<{ account_id: string; timestamp: string } | null>(null);
+    const [desktopProxyConfigured, setDesktopProxyConfigured] = useState(false);
     const [isRefreshingAll, setIsRefreshingAll] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [filter, setFilter] = useState<FilterType>('all');
@@ -199,26 +218,29 @@ export function AccountList({
     const [accountToDelete, setAccountToDelete] = useState<{ id: string, name: string } | null>(null);
     const [pushingIds, setPushingIds] = useState<Set<string>>(new Set());
     const [pushToast, setPushToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-    // Relay 类型账号的余额缓存（与 ChatGPT usage 独立）
+    // Relay balance cache (separate from ChatGPT usage)
     const [relayUsageMap, setRelayUsageMap] = useState<Record<string, RelayUsageCache>>({});
     const [cookieEditor, setCookieEditor] = useState<{ id: string; name: string; value: string } | null>(null);
     const [savingCookie, setSavingCookie] = useState(false);
-    // Codex 邀请弹窗
+    // Codex invite modal
     const [inviteModal, setInviteModal] = useState<{ id: string; name: string } | null>(null);
-    // Codex 启动：用该账号在隔离 CODEX_HOME 直连下开一个真 codex 终端
+    // Launch Codex Desktop (ChatGPT) — uses ~/.codex / phone-anchor identity
     const [launchingIds, setLaunchingIds] = useState<Set<string>>(new Set());
-    // 主动重置：点徽章先弹窗列出所有重置次数（含到期时间），再消耗一次
+    // Manual reset: badge opens modal with credits (expiry), then consume
     const [resetModal, setResetModal] = useState<{ id: string; name: string; credits: number | null } | null>(null);
     const resetQueryVersion = useRef(0);
     const [resetting, setResetting] = useState(false);
     const [resetList, setResetList] = useState<ResetCreditItem[] | null>(null);
     const [resetListLoading, setResetListLoading] = useState(false);
     const [resetListError, setResetListError] = useState<string | null>(null);
-    // 月抛账号到期日：手工维护，与 OAuth token 的 expires_at 完全分开。
+    // Monthly account expiry: manual; separate from OAuth expires_at.
     const [expiryEditor, setExpiryEditor] = useState<{ id: string; name: string; value: string } | null>(null);
     const [savingExpiry, setSavingExpiry] = useState(false);
     const [expiryError, setExpiryError] = useState<string | null>(null);
-    // 周期保鲜：跨过 reset_at 后按账号发一次最小 Codex 请求。
+    const [widgetIdentityEditor, setWidgetIdentityEditor] = useState<{ id: string; name: string; number: string; emoji: string } | null>(null);
+    const [savingWidgetIdentity, setSavingWidgetIdentity] = useState(false);
+    const [widgetIdentityError, setWidgetIdentityError] = useState<string | null>(null);
+    // Window priming: after reset_at, one minimal Codex request per account.
     const [primeEditor, setPrimeEditor] = useState<{
         id: string;
         name: string;
@@ -233,6 +255,26 @@ export function AccountList({
     const [primeError, setPrimeError] = useState<string | null>(null);
 
     const autoReload = settings.auto_reload_ide;
+    useEffect(() => {
+        let mounted = true;
+        const check = async () => {
+            try {
+                const history = await invoke<{ account_id: string; timestamp: string; codex_desktop?: boolean }[]>('get_token_history', { days: 1 });
+                if (mounted) setDesktopUsage(history.filter(e => e.codex_desktop && e.account_id).slice(-1)[0] ?? null);
+                const status = await invoke<{ desktop_proxy_configured: boolean }>('get_proxy_status');
+                if (mounted) setDesktopProxyConfigured(status.desktop_proxy_configured);
+            } catch {
+                if (mounted) setDesktopUsage(null);
+            }
+        };
+        void check();
+        const timer = window.setInterval(check, 5000);
+        return () => { mounted = false; window.clearInterval(timer); };
+    }, []);
+    const lastDesktopAccount = accounts.find(a => a.id === desktopUsage?.account_id);
+    const recentDesktopUsage = desktopUsage && Date.now() - Date.parse(desktopUsage.timestamp) < 10 * 60_000;
+    const selectedSince = accounts.find(a => a.id === currentId)?.last_used;
+    const verifiedAfterSwitch = recentDesktopUsage && (!selectedSince || Date.parse(desktopUsage.timestamp) >= Date.parse(selectedSince));
     const setAutoReload = (val: boolean) => onUpdateSettings({ ...settings, auto_reload_ide: val });
 
     const saveAccountExpiry = async () => {
@@ -245,7 +287,7 @@ export function AccountList({
                 try {
                     await invoke('remote_push_account', { id: expiryEditor.id });
                 } catch (err) {
-                    throw new Error(`本地已保存，但同步 Server 失败：${String(err)}`);
+                    throw new Error(`Saved locally but Server sync failed: ${String(err)}`);
                 }
             }
             onRefreshComplete?.();
@@ -254,6 +296,31 @@ export function AccountList({
             setExpiryError(String(err));
         } finally {
             setSavingExpiry(false);
+        }
+    };
+
+    const saveWidgetIdentity = async () => {
+        if (!widgetIdentityEditor || savingWidgetIdentity) return;
+        const rawNumber = widgetIdentityEditor.number.trim();
+        const number = rawNumber ? Number(rawNumber) : null;
+        if (number !== null && (!Number.isInteger(number) || number < 1 || number > 9999)) {
+            setWidgetIdentityError('Enter a whole number from 1 to 9999, or leave it blank.');
+            return;
+        }
+        setSavingWidgetIdentity(true);
+        setWidgetIdentityError(null);
+        try {
+            await invoke('set_quota_widget_identity', {
+                id: widgetIdentityEditor.id,
+                number,
+                emoji: widgetIdentityEditor.emoji || null,
+            });
+            await onRefreshComplete?.();
+            setWidgetIdentityEditor(null);
+        } catch (err) {
+            setWidgetIdentityError(String(err));
+        } finally {
+            setSavingWidgetIdentity(false);
         }
     };
 
@@ -271,7 +338,7 @@ export function AccountList({
                 try {
                     await invoke('remote_push_account', { id: primeEditor.id });
                 } catch (err) {
-                    throw new Error(`本地已保存，但同步 Server 失败：${String(err)}`);
+                    throw new Error(`Saved locally but Server sync failed: ${String(err)}`);
                 }
             }
             onRefreshComplete?.();
@@ -295,16 +362,16 @@ export function AccountList({
         setLaunchingIds(prev => new Set(prev).add(id));
         try {
             const msg = await invoke<string>('open_codex_terminal', { id });
-            setPushToast({ type: 'success', text: msg || `${name} 已打开 codex 终端` });
+            setPushToast({ type: 'success', text: msg || `${name} Codex Desktop opened` });
         } catch (e) {
-            setPushToast({ type: 'error', text: `${name} 启动失败：${String(e)}` });
+            setPushToast({ type: 'error', text: `${name} launch failed: ${String(e)}` });
         } finally {
             setLaunchingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
             setTimeout(() => setPushToast(null), 4000);
         }
     };
 
-    // 点 🔄 徽章：开弹窗并拉取该号所有可用重置次数（含各自到期时间）
+    // Click 🔄: modal lists reset credits with expiry
     const openResetModal = async (id: string, name: string, credits: number | null) => {
         if (resetting) return;
         const version = ++resetQueryVersion.current;
@@ -332,7 +399,7 @@ export function AccountList({
         setResetListError(null);
     };
 
-    // 消耗完成后无条件关弹窗（绕过 resetting 守卫，因为此刻 resetting 还为 true）
+    // Close modal after consume (bypass resetting guard while resetting is true)
     const closeResetModalForce = () => {
         setResetModal(null);
         setResetList(null);
@@ -342,27 +409,27 @@ export function AccountList({
     const handleConsumeReset = async () => {
         if (!resetModal || resetting || resetListLoading || resetListError || !resetList?.length) return;
         const { id, name } = resetModal;
-        // 记下当前列表，成功后用 consumed_credit_id 反查「烧掉的是哪条」
+        // Track list; after success find consumed credit by id
         const listSnapshot = resetList;
         setResetting(true);
         try {
             const res = await invoke<ResetCreditResult>('consume_reset_credit', { id });
             closeResetModalForce();
-            let text = `${name}：${res.message}`;
+            let text = `${name}: ${res.message}`;
             if (res.ok && res.consumed_credit_id && listSnapshot) {
                 const burned = listSnapshot.find(c => c.id === res.consumed_credit_id);
                 if (burned?.expires_at) {
-                    text = `${name}：${res.message}（消耗了到期 ${fmtExpiry(burned.expires_at)} 的那条）`;
+                    text = `${name}: ${res.message} (used credit expiring ${fmtExpiry(burned.expires_at)})`;
                 }
             }
             setPushToast({ type: res.ok ? 'success' : 'error', text });
-            // 重置成功(或 nothing_to_reset)后重拉一次 quota，刷新限额条 + 剩余次数
+            // After reset (or nothing_to_reset) refresh quota and credits
             if (res.ok || res.code === 'nothing_to_reset') {
                 await handleRefreshOne(id);
             }
         } catch (e) {
             closeResetModalForce();
-            setPushToast({ type: 'error', text: `${name} 重置失败：${humanizeRefreshError(String(e))}` });
+            setPushToast({ type: 'error', text: `${name} reset failed: ${humanizeRefreshError(String(e))}` });
         } finally {
             setResetting(false);
             setTimeout(() => setPushToast(null), 5000);
@@ -371,7 +438,7 @@ export function AccountList({
 
     const openInvite = (id: string, name: string) => setInviteModal({ id, name });
 
-    // 初始化数据
+    // Initialize data
     useEffect(() => {
         const initialUsage: Record<string, UsageData> = {};
         const initialInvalids = new Set<string>();
@@ -394,11 +461,11 @@ export function AccountList({
                     five_hour_left: acc.cached_quota.five_hour_left,
                     five_hour_reset: acc.cached_quota.five_hour_reset,
                     five_hour_reset_at: acc.cached_quota.five_hour_reset_at,
-                    five_hour_label: acc.cached_quota.five_hour_label || '5H 限额',
+                    five_hour_label: acc.cached_quota.five_hour_label || '5H limit',
                     weekly_left: acc.cached_quota.weekly_left,
                     weekly_reset: acc.cached_quota.weekly_reset,
                     weekly_reset_at: acc.cached_quota.weekly_reset_at,
-                    weekly_label: acc.cached_quota.weekly_label || '周限额',
+                    weekly_label: acc.cached_quota.weekly_label || 'Weekly limit',
                     plan_type: acc.cached_quota.plan_type,
                     is_valid_for_cli: isValid,
                     reset_credits: acc.cached_quota.reset_credits,
@@ -414,12 +481,12 @@ export function AccountList({
         setBannedIds(initialBanned);
     }, [accounts]);
 
-    // 自动 reset 后重拉：cached 数据老于 reset_at 时窗口已经重置但缓存还是旧的 0%，
-    // 触发一次 refresh。
-    // - 冷却 90s：足够让上一轮 invoke 完成且 accounts prop 拿到新 cached_quota；
-    //   失败的话 90s 后自动重试，最多 90s/次的开销可以接受
-    // - 跳过 refreshingIds 里在飞的，避免叠加
-    // - is_token_invalid/banned/logged_out 由 backend 持久化，前端尊重
+    // After auto reset: if cache older than reset_at, window reset but cache stale,
+    // trigger refresh.
+    // - 90s cooldown for invoke + new cached_quota;
+    //   retry after 90s on failure
+    // - skip in-flight refreshingIds
+    // - backend persists invalid/banned/logged_out
     const handleRefreshOneRef = useRef<(id: string) => Promise<void>>(async () => {});
     const autoRefreshTsRef = useRef<Map<string, number>>(new Map());
     const refreshingIdsRef = useRef<Set<string>>(new Set());
@@ -451,14 +518,14 @@ export function AccountList({
                 reasons[acc.id] = needs5h ? '5H' : 'weekly';
             }
             if (stale.length === 0) return;
-            console.log(`[AutoRefresh] 触发 ${stale.length} 个账号 reset 后自动刷新:`,
+            console.log(`[AutoRefresh] post-reset refresh for ${stale.length} account(s):`,
                 stale.map(id => `${accounts.find(a => a.id === id)?.name}(${reasons[id]})`).join(', '));
             let cursor = 0;
             const worker = async () => {
                 while (cursor < stale.length) {
                     const i = cursor++;
                     await handleRefreshOneRef.current(stale[i]).catch((e) => {
-                        console.warn(`[AutoRefresh] ${stale[i]} 刷新失败:`, e);
+                        console.warn(`[AutoRefresh] ${stale[i]} refresh failed:`, e);
                     });
                 }
             };
@@ -470,7 +537,7 @@ export function AccountList({
         return () => clearInterval(t);
     }, [accounts]);
 
-    // 搜索与过滤逻辑
+    // Search and filter
     const filteredAccounts = useMemo(() => {
         let result = searchQuery
             ? accounts.filter(a => a.name.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -478,14 +545,14 @@ export function AccountList({
 
         if (filter !== 'all') {
             result = result.filter(a => {
-                // Relay 类账号现在按 relay_category 分流
+                // Relay accounts filtered by relay_category
                 const isRelay = effectiveKind(a) === 'relay';
                 if (filter === 'relay') return isRelay && (a.relay_category ?? 'aggregator') === 'aggregator';
                 if (filter === 'coding_plan') return isRelay && a.relay_category === 'coding_plan';
                 if (filter === 'third_party') return isRelay && a.relay_category === 'third_party';
-                if (isRelay) return false; // 其它 plan 过滤胶囊只看订阅类
+                if (isRelay) return false; // other plan filters are subscription-only
                 if (filter === 'google') return effectiveKind(a) === 'antigravity_oauth';
-                // Sub = 所有 ChatGPT 订阅号（不含 Relay / OpenAI Key）
+                // Sub = ChatGPT subscriptions (not Relay / OpenAI key)
                 if (filter === 'sub') return effectiveKind(a) === 'chatgpt_oauth';
                 const type = usageMap[a.id]?.plan_type?.toLowerCase() || '';
                 if (filter === 'pro') return type.includes('pro');
@@ -513,7 +580,7 @@ export function AccountList({
                 counts.google++;
                 return;
             }
-            // Sub = ChatGPT 订阅类（所有 plan tier 合在一起）
+            // Sub = ChatGPT subscription tiers combined
             if (kind === 'chatgpt_oauth') counts.sub++;
             const type = usageMap[a.id]?.plan_type?.toLowerCase() || '';
             if (type.includes('pro')) counts.pro++;
@@ -524,7 +591,7 @@ export function AccountList({
         return counts;
     }, [accounts, usageMap]);
 
-    // 辅助工具函数
+    // Helpers
     const formatDate = (val?: string | Date | null) => {
         if (!val) return '-';
         const d = typeof val === 'string' ? new Date(val) : val;
@@ -532,12 +599,12 @@ export function AccountList({
     };
 
     const parseDuration = (str?: string) => {
-        if (!str || str === '未知' || str === 'N/A') return { text: 'N/A', hours: 999 };
-        if (str === '即将重置') return { text: '重置中', hours: 0 };
-        const matches = { d: str.match(/(\d+)天/), h: str.match(/(\d+)小时/), m: str.match(/(\d+)分钟/) };
+        if (!str || str === 'Unknown' || str === 'N/A') return { text: 'N/A', hours: 999 };
+        if (str === 'Reset soon') return { text: 'Resetting', hours: 0 };
+        const matches = { d: str.match(/(\d+)d/), h: str.match(/(\d+)h/), m: str.match(/(\d+)m/) };
         const d = parseInt(matches.d?.[1] || '0'), h = parseInt(matches.h?.[1] || '0'), m = parseInt(matches.m?.[1] || '0');
         const totalH = d * 24 + h + m / 60;
-        const compact = d > 0 ? `${d}天 ${h}时` : h > 0 ? `${h}时 ${m}分` : `${m}分`;
+        const compact = d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
         return { text: compact || 'N/A', hours: totalH };
     };
 
@@ -546,9 +613,9 @@ export function AccountList({
         const err = account.keepalive?.last_error;
         const isPermanent = err?.toLowerCase().match(/invalidated|expired|invalid_refresh_token|invalid_grant/);
 
-        if (isPermanent) return { text: '过期', warn: true };
-        if (isCurrent) return { text: '当前账号', warn: false };
-        return { text: err ? '重试中' : '正常', warn: !!err };
+        if (isPermanent) return { text: 'Expired', warn: true };
+        if (isCurrent) return { text: 'Current Account', warn: false };
+        return { text: err ? 'Retrying' : 'OK', warn: !!err };
     };
 
     const handlePushToServer = async (id: string, name: string) => {
@@ -559,13 +626,13 @@ export function AccountList({
                 { id }
             );
             const actionText =
-                r.upserted === 'created' ? '新增'
-                : r.upserted === 'merged' ? '合并到同邮箱旧账号'
-                : '更新';
-            const quotaText = r.quota_refreshed ? '，已刷新额度' : '';
-            setPushToast({ type: 'success', text: `${name} 推送 Server 成功（${actionText}${quotaText}）` });
+                r.upserted === 'created' ? 'New'
+                : r.upserted === 'merged' ? 'Merge into existing account with same email'
+                : 'Updated';
+            const quotaText = r.quota_refreshed ? ', quota refreshed' : '';
+            setPushToast({ type: 'success', text: `${name} push to Server OK (${actionText}${quotaText})` });
         } catch (e) {
-            setPushToast({ type: 'error', text: `${name} 推送失败: ${e}` });
+            setPushToast({ type: 'error', text: `${name} push failed: ${e}` });
         } finally {
             setPushingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
             setTimeout(() => setPushToast(null), 4000);
@@ -578,9 +645,9 @@ export function AccountList({
         try {
             await invoke('switch_antigravity_account', { id });
             onRefreshComplete?.();
-            setPushToast({ type: 'success', text: `Google 当前账号已切换为 ${name}` });
+            setPushToast({ type: 'success', text: `Google current account switched to ${name}` });
         } catch (error) {
-            setPushToast({ type: 'error', text: `Google 切号失败：${String(error)}` });
+            setPushToast({ type: 'error', text: `Google switch failed: ${String(error)}` });
         } finally {
             setSwitchingIds(prev => {
                 const next = new Set(prev);
@@ -597,27 +664,27 @@ export function AccountList({
         try {
             await invoke('switch_relay_model_account',{id,model:null});
             onRefreshComplete?.();
-            setPushToast({type:'success',text:`已将 ${name} 设为其模型的当前账号（Codex / Google 不变）`});
-        }catch(error){setPushToast({type:'error',text:`模型切号失败：${String(error)}`});}
+            setPushToast({type:'success',text:`Set ${name} as model current account (Codex / Google unchanged)`});
+        }catch(error){setPushToast({type:'error',text:`Model switch failed: ${String(error)}`});}
         finally{setSwitchingIds(prev=>{const next=new Set(prev);next.delete(id);return next;});setTimeout(()=>setPushToast(null),4000);}
     };
 
-    // 把 Tauri/后端原始报错翻译成人能看懂的一句话。
+    // Map Tauri/backend errors to readable messages.
     const humanizeRefreshError = (raw: string): string => {
         const s = raw.toLowerCase();
-        if (s.includes('account_banned')) return '账号已被封禁';
-        if (s.includes('token_invalid')) return 'Token 已失效，需要重新登录';
-        if (s.includes('account_logged_out')) return '登录已失效：refresh_token 已过期或被撤销，请重新登录';
-        if (s.includes('token_refresh_transient')) return '刷新失败：网络或服务暂时异常，未判定账号失效';
-        if (s.includes('timeout') || s.includes('timed out')) return '请求超时（OpenAI 端慢/被节流）';
-        if (s.includes('网络请求失败') || s.includes('network')) return '网络请求失败，检查代理/网络';
-        if (s.includes('刷新令牌') || s.includes('refresh')) return 'refresh_token 刷新失败';
-        if (s.includes('relay_account')) return '中转账号请用「中转余额刷新」';
+        if (s.includes('account_banned')) return 'Account banned';
+        if (s.includes('token_invalid')) return 'Token invalid — re-login required';
+        if (s.includes('account_logged_out')) return 'Login invalid: refresh_token expired or revoked — sign in again';
+        if (s.includes('token_refresh_transient')) return 'Refresh failed: transient network/service error; account not marked invalid';
+        if (s.includes('timeout') || s.includes('timed out')) return 'Request timeout (OpenAI slow/throttled)';
+        if (s.includes('Network request failed') || s.includes('network')) return 'Network request failed — check proxy/network';
+        if (s.includes('Refresh token') || s.includes('refresh')) return 'refresh_token refresh failed';
+        if (s.includes('relay_account')) return 'For relay accounts use Relay balance refresh';
         if (raw.length > 160) return raw.slice(0, 160) + '…';
         return raw;
     };
 
-    // 交互处理
+    // Handlers
     const handleRefreshOne = async (id: string) => {
         setRefreshingIds(prev => new Set(prev).add(id));
         const acc = accounts.find(a => a.id === id);
@@ -628,7 +695,7 @@ export function AccountList({
                 await onRefreshComplete?.();
                 return;
             }
-            // Relay 账号走专属 fetcher（不查 OpenAI usage）
+            // Relay uses dedicated fetcher (not OpenAI usage)
             if (acc && effectiveKind(acc) === 'relay') {
                 const cache = await invoke<RelayUsageCache>('refresh_relay_usage', { id });
                 setRelayUsageMap(prev => ({ ...prev, [id]: cache }));
@@ -648,21 +715,21 @@ export function AccountList({
             onRefreshComplete?.();
         } catch (err) {
             const errMsg = String(err);
-            // 仍然按错误类型标 UI 状态
+            // Mark UI state by error type
             if (errMsg.includes('ACCOUNT_BANNED')) {
                 setBannedIds(prev => new Set(prev).add(id));
                 setInvalidIds(prev => new Set(prev).add(id));
             } else if (errMsg.includes('TOKEN_INVALID')) {
                 setInvalidIds(prev => new Set(prev).add(id));
             }
-            // 后端已持久化的需重登状态需要重新读取账号列表，避免只显示 toast。
+            // Reload accounts when backend persisted re-login state.
             if (errMsg.includes('ACCOUNT_LOGGED_OUT')) {
                 onRefreshComplete?.();
             }
-            // 把错误 tip 出来，不再静默失败
+            // Surface errors instead of silent fail
             setPushToast({
                 type: 'error',
-                text: `${accName} 刷新失败：${acc && effectiveKind(acc) === 'antigravity_oauth' ? errMsg : humanizeRefreshError(errMsg)}`,
+                text: `${accName} refresh failed: ${acc && effectiveKind(acc) === 'antigravity_oauth' ? errMsg : humanizeRefreshError(errMsg)}`,
             });
             setTimeout(() => setPushToast(null), 6000);
         } finally {
@@ -670,8 +737,8 @@ export function AccountList({
         }
     };
 
-    // 把最新的 handleRefreshOne 挂到 ref，让上面 reset 后自动刷新的 effect
-    // 不必把它放进依赖里反复重建。
+    // Ref latest handleRefreshOne for post-reset auto refresh effect
+    // Avoid rebuilding effect dependencies.
     handleRefreshOneRef.current = handleRefreshOne;
 
     // The local AGY bridge exposes its quota through /v1/usage. Refresh it on
@@ -704,16 +771,16 @@ export function AccountList({
             setCookieEditor(null);
             await handleRefreshOne(id);
         } catch (e) {
-            setPushToast({ type: 'error', text: `保存 MiMo Cookie 失败: ${e}` });
+            setPushToast({ type: 'error', text: `Save MiMo Cookie failed: ${e}` });
             setTimeout(() => setPushToast(null), 4000);
         } finally {
             setSavingCookie(false);
         }
     };
 
-    /// Relay 余额展示：
-    /// - unit 是 `%` → 进度条 mini-card（GLM 这种百分比模型）
-    /// - 其它（USD/CNY 等金额） → 纯文本 mini-card（unity2 等返回金额的）
+    /// Relay balance display:
+    /// - unit `%` → progress mini-card (GLM-style percent)
+    /// - else (USD/CNY) → text mini-card (unity2 amounts)
     const RelayQuotaItem = ({ account, cache }: { account: Account; cache: RelayUsageCache | undefined }) => {
         const isMiMoRelay = [
             account.relay_usage_preset,
@@ -734,7 +801,7 @@ export function AccountList({
             ? {
                 role: 'button',
                 tabIndex: 0,
-                title: '点击修改 MiMo 配额 Cookie',
+                title: 'Click to edit MiMo quota Cookie',
                 onClick: openCookieEditor,
                 onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => {
                     if (e.key === 'Enter' || e.key === ' ') {
@@ -747,7 +814,7 @@ export function AccountList({
         if (!cache) {
             return (
                 <div className="quota-grid" {...editableProps}>
-                    <QuotaItem label="Token 配额" percentage={undefined} reset={undefined} />
+                    <QuotaItem label="Token quota" percentage={undefined} reset={undefined} />
                 </div>
             );
         }
@@ -758,7 +825,7 @@ export function AccountList({
             return (
                 <div className="quota-grid" {...editableProps}>
                     <QuotaItem
-                        label="Token 配额"
+                        label="Token quota"
                         percentage={cache.remaining}
                         reset={cache.next_reset_at ? '' : undefined}
                         resetAt={cache.next_reset_at ?? undefined}
@@ -766,14 +833,14 @@ export function AccountList({
                 </div>
             );
         }
-        // 金额型：mini-card 风格但中间是数字+单位
+        // Amount style mini-card with number + unit
         const tone = cache.is_active ? 'green' : 'red';
         return (
             <div className="quota-grid" {...editableProps}>
                 <div className="quota-mini-card">
                     <div className={`quota-mini-bg ${tone}`} style={{ width: '100%' }} />
                     <div className="quota-mini-content">
-                        <span className="quota-label">余额</span>
+                        <span className="quota-label">Balance</span>
                         <span className={`quota-percent ${tone}`}>
                             {cache.remaining.toFixed(2)} {unit}
                         </span>
@@ -785,9 +852,10 @@ export function AccountList({
 
     const QuotaItem = ({ label, percentage, reset, resetAt }: { label: string, percentage: number | undefined, reset: string | undefined, resetAt?: number }) => {
         const countdown = useShortCountdown(resetAt);
+        const displayLabel = displayQuotaLabel(label);
         if (percentage === undefined) return (
             <div className="quota-mini-card empty">
-                <span className="quota-label">{label}</span>
+                <span className="quota-label">{displayLabel}</span>
                 <span className="quota-empty">-</span>
             </div>
         );
@@ -800,10 +868,10 @@ export function AccountList({
             <div className="quota-mini-card">
                 <div className={`quota-mini-bg ${color}`} style={{ width: `${percentage}%` }} />
                 <div className="quota-mini-content">
-                    <span className="quota-label">{label}</span>
+                    <span className="quota-label">{displayLabel}</span>
                     <div className={`quota-time ${timeColor}`}>
                         <Clock className="icon-tiny" />
-                        <span>{displayTime}</span>
+                        <span>{displayResetText(displayTime)}</span>
                     </div>
                     <span className={`quota-percent ${color}`}>{Math.round(percentage)}%</span>
                 </div>
@@ -816,7 +884,7 @@ export function AccountList({
             <div className="account-list-toolbar">
                 <div className="search-box">
                     <span className="search-icon">🔍</span>
-                    <input type="text" placeholder="搜索邮箱..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+                    <input type="text" placeholder="Search email..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
                 </div>
                 <div className="filter-group">
                     {(['all', 'sub', 'google', 'pro', 'plus', 'team', 'free', 'relay', 'coding_plan', 'third_party'] as const).map(t => {
@@ -826,8 +894,8 @@ export function AccountList({
                             : t === 'sub' ? 'Sub'
                             : t === 'google' ? 'Google'
                             : t === 'coding_plan' ? 'Plan'
-                            : t === 'third_party' ? '三方'
-                            : t === 'relay' ? '中转'
+                            : t === 'third_party' ? '3rd'
+                            : t === 'relay' ? 'Relay'
                             : t.toUpperCase();
                         return (
                             <button
@@ -844,7 +912,7 @@ export function AccountList({
                 <button
                     className={`toolbar-icon-btn ${autoReload ? 'active-reload' : ''}`}
                     onClick={() => setAutoReload(!autoReload)}
-                    title={autoReload ? '关闭自动重载 IDE' : '开启自动重载 IDE'}
+                    title={autoReload ? 'Disable auto reload IDE' : 'Enable auto reload IDE'}
                 >
                     <Zap size={16} fill={autoReload ? "currentColor" : "none"} />
                 </button>
@@ -852,7 +920,7 @@ export function AccountList({
                     <button
                         className="toolbar-icon-btn toolbar-icon-btn-primary"
                         onClick={onAddAccount}
-                        title="登录账号 (OpenAI / Google / 导入)"
+                        title="Sign in (OpenAI / Google / import)"
                     >
                         <Plus size={16} />
                     </button>
@@ -861,7 +929,7 @@ export function AccountList({
                     <button
                         className="toolbar-icon-btn toolbar-icon-btn-relay"
                         onClick={onAddRelay}
-                        title="添加中转 (Coding Plan / 通用 Responses 中转)"
+                        title="Add Relay (Coding Plan / general Responses relay)"
                     >
                         <Plus size={16} />
                     </button>
@@ -871,16 +939,16 @@ export function AccountList({
                         className="toolbar-icon-btn toolbar-icon-btn-accent"
                         onClick={onRefreshUsage}
                         disabled={usageLoading}
-                        title="刷新 Codex 当前账号额度"
+                        title="Refresh Codex current account quota"
                     >
                         <Gauge className={usageLoading ? 'spinning' : ''} size={16} />
                     </button>
                 )}
-                <button className="btn-refresh" title="刷新当前列表额度" aria-label="刷新当前列表额度" disabled={isRefreshingAll} onClick={() => {
-                    // 之前是 Promise.all 一把梭 — N 个账号同时打 OpenAI usage，
-                    // 一旦边缘节流单个账号要 10s+，整批的尾延迟会跟着慢账号走。
-                    // 改成并发上限 6 的滑动窗口：快账号先回，慢账号自然排队，
-                    // 既不雷霆万钧也不串行。
+                <button className="btn-refresh" title="Refresh quota for listed accounts" aria-label="Refresh quota for listed accounts" disabled={isRefreshingAll} onClick={() => {
+                    // Was Promise.all — N accounts hit OpenAI usage at once,
+                    // one throttled account 10s+ slows whole batch tail latency.
+                    // Now concurrency 6 sliding window: fast first, slow queue,
+                    // not thundering herd nor serial.
                     const CONCURRENCY = 6;
                     const ids = filteredAccounts.map(a => a.id);
                     setIsRefreshingAll(true);
@@ -898,24 +966,31 @@ export function AccountList({
                 </button>
             </div>
 
+            <div className="desktop-quota-indicator" role="status">
+                {!desktopProxyConfigured
+                    ? 'Codex Desktop is not configured to use the proxy. Proxy ON alone does not switch Desktop quota; use Proxy → Global proxy, then restart Desktop.'
+                    : verifiedAfterSwitch && lastDesktopAccount
+                    ? `Codex Desktop quota verified: ${lastDesktopAccount.name}${lastDesktopAccount.id === currentId ? '' : ' (differs from selected)'} · ${new Date(desktopUsage!.timestamp).toLocaleTimeString()}`
+                    : 'Codex Desktop quota unverified — send a request through the proxy to confirm the active account.'}
+            </div>
             <div className="account-table-scroll">
                 <div className="account-table-header">
                     <div className="col-checkbox">
                         <input type="checkbox" className="custom-checkbox" checked={filteredAccounts.length > 0 && filteredAccounts.every(a => selectedIds.has(a.id))} onChange={() => { const s = new Set(selectedIds); filteredAccounts.every(a => s.has(a.id)) ? filteredAccounts.forEach(a => s.delete(a.id)) : filteredAccounts.forEach(a => s.add(a.id)); setSelectedIds(s); }} />
                     </div>
                     <div className="col-drag"></div>
-                    <div className="col-email">账号信息</div>
-                    <div className="col-quota-merged">配额状态</div>
-                    <div className="col-time">同步/保活</div>
-                    <div className="col-actions">操作</div>
+                    <div className="col-email">Account</div>
+                    <div className="col-quota-merged">Quota</div>
+                    <div className="col-time">Sync / keepalive</div>
+                    <div className="col-actions">Actions</div>
                 </div>
 
                 <div className="account-table-body">
                     {filteredAccounts.map(acc => {
                         const usage = usageMap[acc.id];
                         const kind = effectiveKind(acc);
-                        // 被限流 = 任一额度桶（5H / 周 / Spark）剩余为 0，上游已 429 拒绝请求。
-                        // 这一刻消耗一次主动重置回收最大（把 0% 的窗口拉回满）。
+                        // Rate limited = any bucket (5H / week / Spark) at 0; upstream 429.
+                        // Consume one manual reset now to recover (refill 0% window).
                         const rateLimited = !!usage && (
                             usage.five_hour_left === 0 ||
                             usage.weekly_left === 0 ||
@@ -927,7 +1002,7 @@ export function AccountList({
                         const isAntigravityCurrent = kind === 'antigravity_oauth'
                             && settings.current_antigravity_account_id === acc.id;
                         const status = isAntigravityCurrent
-                            ? { text: 'Google 当前', warn: false }
+                            ? { text: 'Google current', warn: false }
                             : relayCurrent.isCurrent ? {text:relayCurrent.label,warn:false} : getStatusInfo(acc);
                         const err = acc.keepalive?.last_error;
                         const isPermanentError = err?.toLowerCase().match(/invalidated|expired|invalid_refresh_token|invalid_grant/);
@@ -951,7 +1026,7 @@ export function AccountList({
                                     <input type="checkbox" className="custom-checkbox" checked={selectedIds.has(acc.id)} onChange={() => { const s = new Set(selectedIds); s.has(acc.id) ? s.delete(acc.id) : s.add(acc.id); setSelectedIds(s); }} />
                                 </div>
                                 <div className="col-drag"><span className="drag-handle">⋮⋮</span></div>
-                                <div className="col-email" title="点击复制账号">
+                                <div className="col-email" title="Click to copy account">
                                     {(() => {
                                         const isRelay = effectiveKind(acc) === 'relay';
                                         const isMiMoRelay = [
@@ -966,7 +1041,7 @@ export function AccountList({
                                                 : (acc.relay_homepage || acc.relay_base_url || ''))
                                             : '';
                                         const onNameClick = (e: React.MouseEvent) => {
-                                            // Relay：点击账号名打开主页/base_url；其它：复制
+                                            // Relay: click name opens homepage/base_url; else copy
                                             if (isRelay && link) {
                                                 e.stopPropagation();
                                                 openUrl(link).catch((err) => {
@@ -980,7 +1055,7 @@ export function AccountList({
                                             <span
                                                 className={isRelay ? 'email-text relay-name-link' : 'email-text'}
                                                 onClick={onNameClick}
-                                                title={isRelay && link ? `点击打开 ${link}` : undefined}
+                                                title={isRelay && link ? `Open ${link}` : undefined}
                                             >
                                                 {acc.name}
                                             </span>
@@ -991,12 +1066,27 @@ export function AccountList({
                                             const k = effectiveKind(acc);
                                             if (k === 'antigravity_oauth' && isAntigravityCurrent) return null;
                                             const meta = k === 'relay' ? relayCategoryBadge(acc) : KIND_BADGE[k];
-                                            return <span className={meta.className}>{meta.label}</span>;
+                                        return <span className={meta.className}>{meta.label}</span>;
                                         })()}
-                                        {copiedId === acc.id && <span className="badge copy-success">已复制</span>}
-                                        {isCurrent && !isModelRelay && <span className="badge current">当前</span>}
-                                        {relayCurrent.isCurrent && <span className="badge current" title={`当前模型：${relayCurrent.active.join('、')}`}>{relayCurrent.label}</span>}
-                                        {isAntigravityCurrent && <span className="badge current">Google 当前</span>}
+                                        <button
+                                            type="button"
+                                            className="badge widget-id-badge"
+                                            title="Set the number and symbol shown in the quota widget"
+                                            onClick={e => {
+                                                e.stopPropagation();
+                                                setWidgetIdentityError(null);
+                                                setWidgetIdentityEditor({
+                                                    id: acc.id,
+                                                    name: acc.name,
+                                                    number: acc.widget_number?.toString() ?? '',
+                                                    emoji: acc.widget_emoji ?? '',
+                                                });
+                                            }}
+                                        >{acc.widget_emoji ? `${acc.widget_emoji} ` : ''}{acc.widget_number == null ? (acc.widget_emoji ? '' : 'ID') : `#${acc.widget_number}`}</button>
+                                        {copiedId === acc.id && <span className="badge copy-success">Copied</span>}
+                                        {isCurrent && !isModelRelay && <span className="badge current">Current</span>}
+                                        {relayCurrent.isCurrent && <span className="badge current" title={`Current models: ${relayCurrent.active.join(', ')}`}>{relayCurrent.label}</span>}
+                                        {isAntigravityCurrent && <span className="badge current">Google current</span>}
                                         {kind === 'antigravity_oauth' && (() => {
                                             const tier = antigravityTier(acc);
                                             return <span className={tier.className}>{tier.label}</span>;
@@ -1004,17 +1094,17 @@ export function AccountList({
                                         {acc.is_session_anchor && (
                                             <span
                                                 className="badge anchor"
-                                                title="手机锚：磁盘 ~/.codex/auth.json 永远跟随此号，Codex.app 手机远程连接绑定此号；切到其他号时 disk 不动、proxy 出口照切"
-                                            >📱 手机锚</span>
+                                                title="Phone anchor: disk ~/.codex/auth.json follows this account; Codex.app phone remote binds here; switching others moves proxy only, disk unchanged"
+                                            >📱 Phone anchor</span>
                                         )}
-                                        {isBanned ? <span className="badge banned" title="该账号已被 OpenAI 封禁">封号</span> : isLoggedOut ? <span className="badge logged-out" title="登录已失效，可能是 refresh_token 过期、被撤销或会话在其他设备结束">需重新登录</span> : isInvalid && <span className="badge expired" title="该账号 Token 已过期或失效">过期</span>}
+                                        {isBanned ? <span className="badge banned" title="This account was banned by OpenAI">Banned</span> : isLoggedOut ? <span className="badge logged-out" title="Login invalid — refresh_token expired, revoked, or session ended elsewhere">Re-login</span> : isInvalid && <span className="badge expired" title="This account token expired or invalid">Expired</span>}
                                         {expiry.badge && <span className={`badge account-expiry ${expiry.tone}`} title={expiry.title}>📅 {expiry.badge}</span>}
                                         {usage?.plan_type && <span className="badge plan">{usage.plan_type.toUpperCase()}</span>}
                                         {kind === 'chatgpt_oauth' && usage?.reset_credits == null && (
                                             <button type="button" className="badge reset-credits clickable"
-                                                title="上游未返回重置次数，不代表次数已清空。点击查询银行明细。"
+                                                title="Upstream returned no reset credits — not necessarily zero. Click to query bank details."
                                                 onClick={() => openResetModal(acc.id, acc.name, null)}>
-                                                🔄 次数未知
+                                                🔄 Credits unknown
                                             </button>
                                         )}
                                         {usage?.reset_credits != null && (
@@ -1022,13 +1112,13 @@ export function AccountList({
                                                 <span
                                                     className={`badge reset-credits clickable${rateLimited ? ' limited' : ''}`}
                                                     title={rateLimited
-                                                        ? '⚡ 当前已被限流（额度桶为 0）——现在用一次主动重置回收最大，点击查看明细'
-                                                        : '点击查看所有主动重置次数（含各自到期时间），再消耗一次重置限额窗口'}
+                                                        ? '⚡ Rate limited (quota bucket 0) — use a manual reset now for best recovery; click for details'
+                                                        : 'Click to list manual reset credits (with expiry), then consume one to reset quota window'}
                                                     onClick={() => openResetModal(acc.id, acc.name, usage.reset_credits ?? 0)}
                                                     style={{ cursor: 'pointer' }}
                                                 >{rateLimited ? '⚡' : ''}🔄 {usage.reset_credits}</span>
                                             ) : (
-                                                <span className="badge reset-credits" title="主动重置次数（剩余 0 次，无法重置）">🔄 {usage.reset_credits}</span>
+                                                <span className="badge reset-credits" title="Manual reset credits (0 left — cannot reset)">🔄 {usage.reset_credits}</span>
                                             )
                                         )}
                                     </div>
@@ -1047,7 +1137,7 @@ export function AccountList({
                                             {usage.spark && (
                                                 <>
                                                     <QuotaItem label="Spark 5H" percentage={usage.spark.five_hour_left} reset={usage.spark.five_hour_reset} resetAt={usage.spark.five_hour_reset_at} />
-                                                    <QuotaItem label="Spark 周" percentage={usage.spark.weekly_left} reset={usage.spark.weekly_reset} resetAt={usage.spark.weekly_reset_at} />
+                                                    <QuotaItem label="Spark weekly" percentage={usage.spark.weekly_left} reset={usage.spark.weekly_reset} resetAt={usage.spark.weekly_reset_at} />
                                                 </>
                                             )}
                                             {usage.luna_reserve?.allowed && !usage.luna_reserve.limit_reached && (
@@ -1059,19 +1149,19 @@ export function AccountList({
                                                 />
                                             )}
                                         </div>
-                                    ) : <span className="quota-empty">未获取数据</span>}
+                                    ) : <span className="quota-empty">No data</span>}
                                 </div>
                                 <div className="col-time">
                                     <div className="time-item">
-                                        <span className="time-label">保活:</span>
+                                        <span className="time-label">Keepalive:</span>
                                         <span className={`time-val ${status.warn ? 'warn' : ''}`}>{status.text}</span>
                                     </div>
                                     <div className="time-item refresh">
-                                        <span className="time-label">刷新:</span>
+                                        <span className="time-label">Refresh:</span>
                                         <span className="time-val">{formatDate(kind === 'antigravity_oauth' ? antigravityQuotaUpdatedAt(acc) : acc.cached_quota?.updated_at)}</span>
                                     </div>
                                     <div className="time-item account-expiry-row">
-                                        <span className="time-label">到期:</span>
+                                        <span className="time-label">Expiry:</span>
                                         <button
                                             className={`time-val account-expiry-value ${expiry.tone}`}
                                             title={expiry.title}
@@ -1087,9 +1177,9 @@ export function AccountList({
                                                 className="wakeup-btn"
                                                 onClick={() => handleLaunchCodex(acc.id, acc.name)}
                                                 disabled={launchingIds.has(acc.id)}
-                                                title='用该账号开一个真 codex 终端（隔离 + 直连），可发一句"你好"触发 referral 兑现'
+                                                title='Open Codex Desktop (ChatGPT app). Uses ~/.codex — with phone anchor, the anchored account stays on disk.'
                                             >
-                                                {launchingIds.has(acc.id) ? '启动中…' : '🚀 启动 codex'}
+                                                {launchingIds.has(acc.id) ? 'Starting…' : '🚀 Launch Desktop'}
                                             </button>
                                             {effectiveKind(acc) === 'chatgpt_oauth' && (
                                                 <button
@@ -1108,45 +1198,45 @@ export function AccountList({
                                                         });
                                                     }}
                                                     title={priming?.last_error
-                                                        ? `周期保鲜最近错误：${priming.last_error}`
-                                                        : '周期保鲜会在额度窗口到点后自动发一次最小 Codex 请求'}
-                                                >{primingEnabled ? `🌿 周期保鲜 · ${primingLabel}` : `🌿 保鲜已关 · ${primingLabel}`}</button>
+                                                        ? `Window priming last error: ${priming.last_error}`
+                                                        : 'Window priming sends one minimal Codex request after quota window reset'}
+                                                >{primingEnabled ? `🌿 Priming · ${primingLabel}` : `🌿 Priming off · ${primingLabel}`}</button>
                                             )}
                                         </div>
                                     )}
                                 </div>
                                 <div className="col-actions">
-                                    <button className="action-btn refresh" onClick={() => handleRefreshOne(acc.id)} disabled={isRefreshing} title={kind === 'antigravity_oauth' ? '刷新模型额度' : '刷新'}><RefreshCw size={14} className={isRefreshing ? 'spinning' : ''} /></button>
+                                    <button className="action-btn refresh" onClick={() => handleRefreshOne(acc.id)} disabled={isRefreshing} title={kind === 'antigravity_oauth' ? 'Refresh model quota' : 'Refresh'}><RefreshCw size={14} className={isRefreshing ? 'spinning' : ''} /></button>
                                     {settings.remote_mode === 'client' && effectiveKind(acc) !== 'antigravity_oauth' && (
                                         <button
                                             className="action-btn push"
                                             onClick={() => handlePushToServer(acc.id, acc.name)}
                                             disabled={pushingIds.has(acc.id)}
-                                            title="推送到 Server"
+                                            title="Push to Server"
                                         >
                                             <UploadCloud size={14} className={pushingIds.has(acc.id) ? 'spinning' : ''} />
                                         </button>
                                     )}
                                     {!isCurrent && !isModelRelay && effectiveKind(acc) !== 'antigravity_oauth' && (
-                                        <button className="action-btn switch" onClick={() => onSwitch(acc.id)} disabled={switchingIds.has(acc.id)} title="切换"><ArrowLeftRight size={14} /></button>
+                                        <button className="action-btn switch" onClick={() => onSwitch(acc.id)} disabled={switchingIds.has(acc.id)} title="Switch"><ArrowLeftRight size={14} /></button>
                                     )}
                                     {isModelRelay && !relayCurrent.allCurrent && <button className="action-btn switch"
                                         onClick={()=>handleSwitchRelayModel(acc.id,acc.name)} disabled={switchingIds.has(acc.id)}
-                                        title={`设为这些模型的当前号：${relayCurrent.models.join('、')}（不影响 Codex / Google）`}><ArrowLeftRight size={14}/></button>}
+                                        title={`Set current for models: ${relayCurrent.models.join(', ')} (Codex / Google unchanged)`}><ArrowLeftRight size={14}/></button>}
                                     {kind === 'antigravity_oauth' && !isAntigravityCurrent && (
                                         <button
                                             className="action-btn switch"
                                             onClick={() => handleSwitchAntigravity(acc.id, acc.name)}
                                             disabled={switchingIds.has(acc.id)}
-                                            title="切换 Google 当前账号（不影响 Codex 当前账号）"
+                                            title="Switch Google current (Codex current unchanged)"
                                         >
                                             <ArrowLeftRight size={14} />
                                         </button>
                                     )}
                                     {effectiveKind(acc) === 'chatgpt_oauth' && (usage?.plan_type ?? '').toLowerCase() !== 'free' && (
-                                        <button className="action-btn invite" onClick={() => openInvite(acc.id, acc.name)} title="ChatGPT 桌面版邀请与奖励"><UserPlus size={14} /></button>
+                                        <button className="action-btn invite" onClick={() => openInvite(acc.id, acc.name)} title="ChatGPT desktop invites & rewards"><UserPlus size={14} /></button>
                                     )}
-                                    <button className="action-btn delete" onClick={() => setAccountToDelete({ id: acc.id, name: acc.name })} title="删除"><Trash2 size={14} /></button>
+                                    <button className="action-btn delete" onClick={() => setAccountToDelete({ id: acc.id, name: acc.name })} title="Delete"><Trash2 size={14} /></button>
                                 </div>
                             </div>
                         );
@@ -1155,8 +1245,8 @@ export function AccountList({
             </div>
 
             <div className="account-list-footer">
-                <span>共 {filteredAccounts.length} 个账号</span>
-                {selectedIds.size > 0 && <span className="selected-info">已选 {selectedIds.size} 个</span>}
+                <span>{filteredAccounts.length} account(s)</span>
+                {selectedIds.size > 0 && <span className="selected-info">{selectedIds.size} selected</span>}
                 {pushToast && (
                     <span className={`push-toast ${pushToast.type}`} style={{ marginLeft: 'auto' }}>
                         {pushToast.text}
@@ -1166,9 +1256,9 @@ export function AccountList({
 
             <ConfirmModal
                 isOpen={!!accountToDelete}
-                title="确认删除账号"
-                message={<p>确定要永久删除账号 <strong>{accountToDelete?.name}</strong> 吗？<br /><br />此操作不可恢复，删除后有关该账号的本地授权信息将被清除。</p>}
-                confirmText="彻底删除"
+                title="Confirm delete account"
+                message={<p>Permanently delete account <strong>{accountToDelete?.name}</strong>?<br /><br />This cannot be undone; local auth for this account will be removed.</p>}
+                confirmText="Delete permanently"
                 onConfirm={() => {
                     if (accountToDelete) {
                         onDelete(accountToDelete.id);
@@ -1183,13 +1273,13 @@ export function AccountList({
                     <div className="modal-content account-expiry-modal" onClick={e => e.stopPropagation()}>
                         <div className="account-expiry-modal-header">
                             <div>
-                                <h2>账号到期日</h2>
+                                <h2>Account expiry date</h2>
                                 <p>{expiryEditor.name}</p>
                             </div>
                             <button className="close-btn" onClick={() => setExpiryEditor(null)} disabled={savingExpiry}>×</button>
                         </div>
                         <div className="account-expiry-modal-body">
-                            <label htmlFor="account-expiry-date">到期日期</label>
+                            <label htmlFor="account-expiry-date">Expiry date</label>
                             <input
                                 id="account-expiry-date"
                                 type="date"
@@ -1197,7 +1287,7 @@ export function AccountList({
                                 onChange={e => setExpiryEditor({ ...expiryEditor, value: e.target.value })}
                                 disabled={savingExpiry}
                             />
-                            <p className="account-expiry-help">ChatGPT / Codex 目前没有提供可靠的订阅到期日接口，因此这里由你手工维护。它不会修改登录 Token、不会当作额度重置时间，也不会触发自动切号。留空保存可清除日期。</p>
+                            <p className="account-expiry-help">ChatGPT / Codex do not expose a reliable subscription expiry API — set it manually here. Does not change login token, quota reset, or auto-switch. Clear the date and save to remove.</p>
                             {expiryError && <p className="account-expiry-error">{expiryError}</p>}
                         </div>
                         <div className="account-expiry-modal-actions">
@@ -1205,11 +1295,60 @@ export function AccountList({
                                 className="secondary-btn"
                                 onClick={() => setExpiryEditor({ ...expiryEditor, value: '' })}
                                 disabled={savingExpiry || !expiryEditor.value}
-                            >清除日期</button>
+                            >Clear date</button>
                             <div className="account-expiry-modal-actions-right">
-                                <button className="secondary-btn" onClick={() => setExpiryEditor(null)} disabled={savingExpiry}>取消</button>
+                                <button className="secondary-btn" onClick={() => setExpiryEditor(null)} disabled={savingExpiry}>Cancel</button>
                                 <button className="primary-btn" onClick={saveAccountExpiry} disabled={savingExpiry}>
-                                    {savingExpiry ? '保存中…' : '保存'}
+                                    {savingExpiry ? 'Saving…' : 'Save'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {widgetIdentityEditor && (
+                <div className="modal-overlay" onClick={() => !savingWidgetIdentity && setWidgetIdentityEditor(null)}>
+                    <div className="modal-content account-expiry-modal" onClick={e => e.stopPropagation()}>
+                        <div className="account-expiry-modal-header">
+                            <div>
+                                <h2>Widget account identifier</h2>
+                                <p>{widgetIdentityEditor.name}</p>
+                            </div>
+                            <button className="close-btn" onClick={() => setWidgetIdentityEditor(null)} disabled={savingWidgetIdentity}>×</button>
+                        </div>
+                        <div className="account-expiry-modal-body">
+                            <label htmlFor="widget-account-number">Number ID</label>
+                            <input
+                                id="widget-account-number"
+                                type="number"
+                                min={1}
+                                max={9999}
+                                step={1}
+                                placeholder="Optional"
+                                value={widgetIdentityEditor.number}
+                                onChange={e => setWidgetIdentityEditor({ ...widgetIdentityEditor, number: e.target.value })}
+                                disabled={savingWidgetIdentity}
+                            />
+                            <label htmlFor="widget-account-emoji">Symbol / emoji</label>
+                            <select
+                                id="widget-account-emoji"
+                                value={widgetIdentityEditor.emoji}
+                                onChange={e => setWidgetIdentityEditor({ ...widgetIdentityEditor, emoji: e.target.value })}
+                                disabled={savingWidgetIdentity}
+                            >
+                                <option value="">None</option>
+                                {WIDGET_EMOJIS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                            </select>
+                            <p className="account-expiry-help">Choose Number or Emoji in Settings → Appearance. A missing identifier falls back to the shortened account name.</p>
+                            {widgetIdentityError && <p className="account-expiry-error">{widgetIdentityError}</p>}
+                        </div>
+                        <div className="account-expiry-modal-actions">
+                            <span />
+                            <div className="account-expiry-modal-actions-right">
+                                <button className="secondary-btn" onClick={() => setWidgetIdentityEditor(null)} disabled={savingWidgetIdentity}>Cancel</button>
+                                <button className="primary-btn" onClick={saveWidgetIdentity} disabled={savingWidgetIdentity}>
+                                    {savingWidgetIdentity ? 'Saving…' : 'Save'}
                                 </button>
                             </div>
                         </div>
@@ -1222,7 +1361,7 @@ export function AccountList({
                     <div className="modal-content account-expiry-modal window-prime-modal" onClick={e => e.stopPropagation()}>
                         <div className="account-expiry-modal-header">
                             <div>
-                                <h2>周期保鲜</h2>
+                                <h2>Window priming</h2>
                                 <p>{primeEditor.name}</p>
                             </div>
                             <button className="close-btn" onClick={() => setPrimeEditor(null)} disabled={savingPrime}>×</button>
@@ -1236,7 +1375,7 @@ export function AccountList({
                                         onChange={e => setPrimeEditor({ ...primeEditor, fiveHour: e.target.checked })}
                                         disabled={savingPrime}
                                     />
-                                    <span><strong>接口返回 · 5 小时窗口</strong><small>按 primary_window 实际时长自动识别</small></span>
+                                    <span><strong>API · 5-hour window</strong><small>Auto-detect from primary_window duration</small></span>
                                 </label>
                             ) : (
                                 <label className="window-prime-option">
@@ -1246,15 +1385,15 @@ export function AccountList({
                                         onChange={e => setPrimeEditor({ ...primeEditor, weekly: e.target.checked })}
                                         disabled={savingPrime}
                                     />
-                                    <span><strong>接口返回 · 7 天窗口</strong><small>按 primary_window 实际时长自动识别</small></span>
+                                    <span><strong>API · 7-day window</strong><small>Auto-detect from primary_window duration</small></span>
                                 </label>
                             )}
-                            <p className="account-expiry-help">系统默认自动管理全部订阅号，并以 /wham/usage 返回的 primary_window 实际时长判断 5H 或 7D，不绑定套餐名称。首次遇到无法确认是否激活的 100% 窗口时只发一次极小请求；之后按固定 reset_at 到点触发。这里可以单独关闭该账号，client/solo 模式由 Server 单端执行。</p>
+                            <p className="account-expiry-help">By default all subscription accounts are managed using /wham/usage primary_window for 5H vs 7D (not plan name). First ambiguous 100% window gets one tiny request; then fixed reset_at schedule. Disable per account here; client/solo runs on Server only.</p>
                             {(primeEditor.lastAttempt || primeEditor.lastSuccess || primeEditor.lastError) && (
                                 <div className="window-prime-status">
-                                    {primeEditor.lastAttempt && <span>最近尝试：{new Date(primeEditor.lastAttempt).toLocaleString()}</span>}
-                                    {primeEditor.lastSuccess && <span className="ok">最近成功：{new Date(primeEditor.lastSuccess).toLocaleString()}</span>}
-                                    {primeEditor.lastError && <span className="err">最近结果：{primeEditor.lastError}</span>}
+                                    {primeEditor.lastAttempt && <span>Last attempt: {new Date(primeEditor.lastAttempt).toLocaleString()}</span>}
+                                    {primeEditor.lastSuccess && <span className="ok">Last success: {new Date(primeEditor.lastSuccess).toLocaleString()}</span>}
+                                    {primeEditor.lastError && <span className="err">Last result: {primeEditor.lastError}</span>}
                                 </div>
                             )}
                             {primeError && <p className="account-expiry-error">{primeError}</p>}
@@ -1262,9 +1401,9 @@ export function AccountList({
                         <div className="account-expiry-modal-actions">
                             <span></span>
                             <div className="account-expiry-modal-actions-right">
-                                <button className="secondary-btn" onClick={() => setPrimeEditor(null)} disabled={savingPrime}>取消</button>
+                                <button className="secondary-btn" onClick={() => setPrimeEditor(null)} disabled={savingPrime}>Cancel</button>
                                 <button className="primary-btn" onClick={saveWindowPriming} disabled={savingPrime}>
-                                    {savingPrime ? '保存中…' : '保存'}
+                                    {savingPrime ? 'Saving…' : 'Save'}
                                 </button>
                             </div>
                         </div>
@@ -1277,19 +1416,19 @@ export function AccountList({
                     <div className="modal-content reset-credit-modal" onClick={e => e.stopPropagation()}>
                         <div className="modal-header">
                             <div className="header-top">
-                                <h2>主动重置 · {resetModal.name}</h2>
+                                <h2>Manual reset · {resetModal.name}</h2>
                                 <button className="close-btn" onClick={closeResetModal} disabled={resetting}>×</button>
                             </div>
                         </div>
                         <div className="modal-body">
                             {resetListLoading ? (
-                                <p className="modal-tip">正在拉取重置次数明细…</p>
+                                <p className="modal-tip">Loading reset credits…</p>
                             ) : resetListError ? (
-                                <p className="modal-tip err" role="alert">拉取明细失败：{resetListError}<br />当前可用次数无法确认，不代表已清空。请稍后重试查询。</p>
+                                <p className="modal-tip err" role="alert">Failed to load details: {resetListError}<br />Available count unknown — not necessarily zero. Retry later.</p>
                             ) : resetList && resetList.length > 0 ? (
                                 <>
                                     <p className="modal-tip" style={{ marginBottom: 10 }}>
-                                        共 <strong>{resetList.length}</strong> 次，按到期时间排序（最早在前）。所有次数<strong>等价</strong>，区别仅到期时间；<strong>消耗哪条由服务端决定</strong>（通常最早到期优先，客户端无法指定）。
+                                        <strong>{resetList.length}</strong> credit(s), sorted by expiry (earliest first). All credits are <strong>equivalent</strong>; server picks which to consume (usually earliest expiry).
                                     </p>
                                     <ul className="reset-credit-list">
                                         {resetList.map((c, i) => {
@@ -1299,33 +1438,33 @@ export function AccountList({
                                                 <li key={c.id} className={`reset-credit-row ${urgency}`}>
                                                     <span className="rc-mark">{i === 0 ? '▸' : ''}</span>
                                                     <span className="rc-expiry">{fmtExpiry(c.expires_at)}</span>
-                                                    <span className="rc-days">{dl == null ? '' : `剩 ${dl} 天`}</span>
+                                                    <span className="rc-days">{dl == null ? '' : `${dl}d left`}</span>
                                                     <span className="rc-source">{c.source}</span>
-                                                    {i === 0 && <span className="rc-badge">将被消耗</span>}
+                                                    {i === 0 && <span className="rc-badge">Will be used</span>}
                                                 </li>
                                             );
                                         })}
                                     </ul>
                                     <p className="modal-tip" style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
-                                        消耗 1 次会把当前已耗尽的 5H / 周限额窗口立刻清零，此操作不可撤销。若额度还没用到上限，上游会返回「无可重置」且<strong>不扣次数</strong>。
+                                        Using 1 credit clears exhausted 5H / weekly window immediately; irreversible. If quota not maxed, upstream may return nothing to reset and <strong>not deduct</strong>.
                                     </p>
                                 </>
                             ) : (
-                                <p className="modal-tip">该账号当前没有可用的主动重置次数。</p>
+                                <p className="modal-tip">No manual reset credits for this account.</p>
                             )}
                         </div>
                         <div className="modal-footer">
-                            <button type="button" className="btn btn-ghost" onClick={closeResetModal} disabled={resetting}>取消</button>
+                            <button type="button" className="btn btn-ghost" onClick={closeResetModal} disabled={resetting}>Cancel</button>
                             <button type="button" className="btn btn-ghost"
                                 onClick={() => openResetModal(resetModal.id, resetModal.name, resetModal.credits)}
-                                disabled={resetting || resetListLoading}>重新查询</button>
+                                disabled={resetting || resetListLoading}>Query again</button>
                             <button
                                 type="button"
                                 className="btn btn-primary"
                                 onClick={handleConsumeReset}
                                 disabled={resetting || resetListLoading || !!resetListError || !resetList?.length}
                             >
-                                {resetting ? '正在重置…' : '立即重置'}
+                                {resetting ? 'Resetting…' : 'Reset now'}
                             </button>
                         </div>
                     </div>
@@ -1337,7 +1476,7 @@ export function AccountList({
                     <div className="modal-content" onClick={e => e.stopPropagation()}>
                         <div className="modal-header">
                             <div className="header-top">
-                                <h2>修改 MiMo 配额 Cookie</h2>
+                                <h2>Edit MiMo quota Cookie</h2>
                                 <button className="close-btn" onClick={() => setCookieEditor(null)} disabled={savingCookie}>
                                     ×
                                 </button>
@@ -1345,7 +1484,7 @@ export function AccountList({
                         </div>
                         <div className="modal-body">
                             <p className="modal-tip" style={{ marginBottom: 12 }}>
-                                账号：{cookieEditor.name}。登录 <code>platform.xiaomimimo.com</code> 后，从 Network 请求里复制 <code>Cookie:</code> header。
+                                Account: {cookieEditor.name}. Sign in at <code>platform.xiaomimimo.com</code>, copy <code>Cookie:</code> header from Network.
                             </p>
                             <textarea
                                 value={cookieEditor.value}
@@ -1358,10 +1497,10 @@ export function AccountList({
                         </div>
                         <div className="modal-footer">
                             <button type="button" className="btn btn-ghost" onClick={() => setCookieEditor(null)} disabled={savingCookie}>
-                                取消
+                                Cancel
                             </button>
                             <button type="button" className="btn btn-primary" onClick={handleSaveUsageCookie} disabled={savingCookie}>
-                                {savingCookie ? '保存中…' : '保存并刷新'}
+                                {savingCookie ? 'Saving…' : 'Save and refresh'}
                             </button>
                         </div>
                     </div>

@@ -27,17 +27,17 @@ pub enum SwitchReason {
 impl std::fmt::Display for SwitchReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SwitchReason::Manual => write!(f, "手动切号"),
-            SwitchReason::Http429 => write!(f, "429 限额"),
-            SwitchReason::InStreamRateLimit => write!(f, "流内限额"),
-            SwitchReason::InStreamBanned => write!(f, "流内封号"),
-            SwitchReason::QuotaThreshold => write!(f, "阈值预防"),
-            SwitchReason::WebSocketPrecheck => write!(f, "WS 预检"),
-            SwitchReason::WebSocketRateLimit => write!(f, "WS 限额"),
-            SwitchReason::BannedDetected => write!(f, "封号检测"),
-            SwitchReason::AutoQuotaRefresh => write!(f, "自动刷新"),
-            SwitchReason::BackgroundKeepalive => write!(f, "后台保活"),
-            SwitchReason::RemoteFallback => write!(f, "Server 不可达回退"),
+            SwitchReason::Manual => write!(f, "Manual switch"),
+            SwitchReason::Http429 => write!(f, "HTTP 429 rate limit"),
+            SwitchReason::InStreamRateLimit => write!(f, "In-stream rate limit"),
+            SwitchReason::InStreamBanned => write!(f, "In-stream account block"),
+            SwitchReason::QuotaThreshold => write!(f, "Quota threshold"),
+            SwitchReason::WebSocketPrecheck => write!(f, "WebSocket quota precheck"),
+            SwitchReason::WebSocketRateLimit => write!(f, "WebSocket rate limit"),
+            SwitchReason::BannedDetected => write!(f, "Account block detected"),
+            SwitchReason::AutoQuotaRefresh => write!(f, "Automatic quota refresh"),
+            SwitchReason::BackgroundKeepalive => write!(f, "Background keepalive"),
+            SwitchReason::RemoteFallback => write!(f, "Server unavailable; using fallback"),
         }
     }
 }
@@ -89,7 +89,7 @@ impl SwitchLogger {
 
         println!(
             "[SwitchLog] {} → {} ({})",
-            event.from_account.as_deref().unwrap_or("无"),
+            event.from_account.as_deref().unwrap_or("None"),
             event.to_account,
             event.reason
         );

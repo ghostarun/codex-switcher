@@ -2,12 +2,13 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { TrayPopup } from "./components/TrayPopup";
+import { QuotaOverlay } from "./components/QuotaOverlay";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 const label = getCurrentWebviewWindow().label;
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    {label === "tray-popup" ? <TrayPopup /> : <App />}
+    {label === "tray-popup" ? <TrayPopup /> : label === "quota-overlay" ? <QuotaOverlay /> : <App />}
   </React.StrictMode>,
 );

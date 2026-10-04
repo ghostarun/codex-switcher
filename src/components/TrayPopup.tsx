@@ -2,24 +2,9 @@ import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-// Rust 端 on_window_event(Focused(false)) 负责隐藏弹窗
+import { QuotaOverlay } from './QuotaOverlay';
+// Rust on_window_event(Focused(false)) hides the popup
 import './TrayPopup.css';
-
-interface QuotaInfo {
-    five_hour_left: number;
-    five_hour_reset_at: number | null;
-    weekly_left: number;
-    weekly_reset_at: number | null;
-    plan_type: string;
-}
-
-interface AccountInfo {
-    name: string;
-    is_banned: boolean;
-    is_token_invalid: boolean;
-    is_logged_out: boolean;
-    cached_quota: QuotaInfo | null;
-}
 
 interface ProxyStatus {
     enabled: boolean;
@@ -40,21 +25,11 @@ interface TokenStats {
 }
 
 interface TrayData {
-    account: AccountInfo | null;
     proxy: ProxyStatus;
     tokens: TokenStats;
     next_account: { name: string; score: number } | null;
-    /** 当前 anchor 账号名（若有），current != anchor 时切号 disk 不动 */
+    /** Anchor account name when set; switching current while anchor differs leaves disk on anchor */
     anchor: { name: string; is_current: boolean } | null;
-}
-
-function formatCountdown(resetAt: number | null): string {
-    if (!resetAt || resetAt <= 0) return '未知';
-    const diff = resetAt - Math.floor(Date.now() / 1000);
-    if (diff <= 0) return '已重置';
-    const h = Math.floor(diff / 3600);
-    const m = Math.floor((diff % 3600) / 60);
-    return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
 function formatTokens(n: number): string {
@@ -63,43 +38,22 @@ function formatTokens(n: number): string {
     return n.toString();
 }
 
-function statusClass(pct: number): string {
-    if (pct > 50) return 'healthy';
-    if (pct > 10) return 'warning';
-    return 'critical';
-}
-
-function statusLabel(pct: number): string {
-    if (pct > 50) return 'HEALTHY';
-    if (pct > 10) return 'WARNING';
-    return 'CRITICAL';
-}
-
 export function TrayPopup() {
     const [data, setData] = useState<TrayData | null>(null);
     const [switching, setSwitching] = useState(false);
 
     const fetchData = async () => {
         try {
-            const [proxy, tokens] = await Promise.all([
+            const [proxy, tokens, accounts, currentId] = await Promise.all([
                 invoke<ProxyStatus>('get_proxy_status'),
                 invoke<TokenStats>('get_token_stats'),
+                invoke<any[]>('get_accounts'),
+                invoke<string | null>('get_current_account_id'),
             ]);
 
-            // Get current account info from accounts list
-            const accounts = await invoke<any[]>('get_accounts');
-            const currentId = await invoke<string | null>('get_current_account_id');
-            const account = currentId ? accounts.find((a: any) => a.id === currentId) : null;
             const anchorAcc = accounts.find((a: any) => a.is_session_anchor);
 
             setData({
-                account: account ? {
-                    name: account.name,
-                    is_banned: account.is_banned,
-                    is_token_invalid: account.is_token_invalid,
-                    is_logged_out: account.is_logged_out,
-                    cached_quota: account.cached_quota,
-                } : null,
                 proxy,
                 tokens,
                 next_account: null, // Will be populated later
@@ -119,7 +73,7 @@ export function TrayPopup() {
         const interval = setInterval(fetchData, 5000);
         const unsub = listen('accounts-updated', fetchData);
 
-        // 焦点丢失由 Rust 端 on_window_event 处理
+        // Focus loss handled by Rust on_window_event
 
         return () => {
             clearInterval(interval);
@@ -144,7 +98,7 @@ export function TrayPopup() {
         try {
             const currentId = await invoke<string | null>('get_current_account_id');
             if (!currentId) return;
-            // Relay 账号走 refresh_relay_usage（GLM 等），订阅号走 OpenAI usage 路径。
+            // Relay accounts use refresh_relay_usage; subscriptions use OpenAI usage path.
             const accounts = await invoke<Array<{ id: string; kind?: string }>>('get_accounts');
             const acc = accounts.find(a => a.id === currentId);
             const isRelay = (acc?.kind ?? '').toLowerCase() === 'relay';
@@ -164,10 +118,6 @@ export function TrayPopup() {
         getCurrentWebviewWindow().hide();
     };
 
-    const q = data?.account?.cached_quota;
-    const fiveH = q?.five_hour_left ?? 0;
-    const weekly = q?.weekly_left ?? 0;
-
     return (
         <div className="tray-popup">
             {/* Header */}
@@ -184,71 +134,21 @@ export function TrayPopup() {
                 )}
             </div>
 
-            {/* Account */}
-            {data?.account && (
-                <div className="tp-account">
-                    {data.account.name}
-                    <span className="tp-plan">{q?.plan_type || '-'}</span>
-                    {data.account.is_banned && <span className="tp-banned">封号</span>}
-                    {data.account.is_logged_out && !data.account.is_banned && <span className="tp-logged-out">需重登</span>}
-                    {data.account.is_token_invalid && !data.account.is_banned && !data.account.is_logged_out && <span className="tp-invalid">失效</span>}
-                </div>
-            )}
-
-            {/* Anchor 状态条：anchor != current 时显示"手机在 X，代理出口在 current"，帮用户秒懂当前 disk 锁在哪号 */}
+            {/* Anchor bar when anchor != current: phone on anchor, proxy on current */}
             {data?.anchor && !data.anchor.is_current && (
                 <div className="tp-anchor">
                     <span className="tp-anchor-icon">📱</span>
-                    <span className="tp-anchor-text">
-                        手机锚 <b>{data.anchor.name}</b> · 代理出口 <b>{data.account?.name}</b>
-                    </span>
+                    <span className="tp-anchor-text">Phone anchor <b>{data.anchor.name}</b> · active quota shown below</span>
                 </div>
             )}
             {data?.anchor && data.anchor.is_current && (
                 <div className="tp-anchor matched">
                     <span className="tp-anchor-icon">📱</span>
-                    <span className="tp-anchor-text">手机锚 = 当前号</span>
+                    <span className="tp-anchor-text">Phone anchor = current</span>
                 </div>
             )}
 
-            {/* Quota Cards */}
-            <div className="tp-cards">
-                <div className={`tp-card ${statusClass(fiveH)}`}>
-                    <div className="tp-card-header">
-                        <span className="tp-card-icon">⚡</span>
-                        <span>SESSION</span>
-                        <span className={`tp-status ${statusClass(fiveH)}`}>{statusLabel(fiveH)}</span>
-                    </div>
-                    <div className="tp-card-value">
-                        {q ? Math.round(fiveH) : '-'}<span className="tp-unit">%</span>
-                        <span className="tp-remaining">Remaining</span>
-                    </div>
-                    <div className="tp-progress">
-                        <div className={`tp-progress-bar ${statusClass(fiveH)}`} style={{ width: `${fiveH}%` }} />
-                    </div>
-                    <div className="tp-reset">
-                        Resets in {q ? formatCountdown(q.five_hour_reset_at) : '-'}
-                    </div>
-                </div>
-
-                <div className={`tp-card ${statusClass(weekly)}`}>
-                    <div className="tp-card-header">
-                        <span className="tp-card-icon">📅</span>
-                        <span>WEEKLY</span>
-                        <span className={`tp-status ${statusClass(weekly)}`}>{statusLabel(weekly)}</span>
-                    </div>
-                    <div className="tp-card-value">
-                        {q ? Math.round(weekly) : '-'}<span className="tp-unit">%</span>
-                        <span className="tp-remaining">Remaining</span>
-                    </div>
-                    <div className="tp-progress">
-                        <div className={`tp-progress-bar ${statusClass(weekly)}`} style={{ width: `${weekly}%` }} />
-                    </div>
-                    <div className="tp-reset">
-                        Resets in {q ? formatCountdown(q.weekly_reset_at) : '-'}
-                    </div>
-                </div>
-            </div>
+            <QuotaOverlay embedded />
 
             {/* Cost & Token Cards */}
             <div className="tp-cards">
@@ -263,7 +163,7 @@ export function TrayPopup() {
                     </div>
                     {data?.tokens.last_month_cost !== null && data?.tokens.last_month_cost !== undefined && (
                         <div className="tp-compare">
-                            Vs 上月 ${data.tokens.last_month_cost.toFixed(2)}
+                            Vs last month ${data.tokens.last_month_cost.toFixed(2)}
                         </div>
                     )}
                 </div>

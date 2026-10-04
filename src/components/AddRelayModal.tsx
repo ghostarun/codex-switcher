@@ -12,10 +12,10 @@ interface AddRelayModalProps {
 }
 
 const GROUPS: Array<{ id: NonNullable<RelayPreset['group']>; note: string }> = [
-    { id: '通用中转', note: '基于 new-api / CLIProxyAPI / sub2api 的第三方中转，原生 /v1/responses' },
-    { id: 'CODING PLAN', note: '厂商编程订阅，按服务支持选择 Responses 或 Chat Completions' },
-    { id: '三方模型', note: '厂商按量付费 API（DeepSeek / Kimi / 通义 / OpenRouter 等）' },
-    { id: '自定义', note: '手动填 base_url' },
+    { id: 'General relay', note: 'Third-party relays (new-api / CLIProxyAPI / sub2api), native /v1/responses' },
+    { id: 'CODING PLAN', note: 'Vendor coding subscriptions; Responses or Chat Completions per service' },
+    { id: 'Third-party models', note: 'Vendor pay-as-you-go APIs (DeepSeek / Kimi / Qwen / OpenRouter, etc.)' },
+    { id: 'Custom', note: 'Manual base_url' },
 ];
 
 function ProviderLogo({ preset, large }: { preset: RelayPreset; large?: boolean }) {
@@ -56,7 +56,7 @@ function ProviderCard({
                 <div className="cs-pcard__top">
                     <span className="cs-pcard__name">{preset.name}</span>
                     <div className="cs-pcard__tags">
-                        {isSubscription && <span className="cs-rbadge cs-rbadge--sub">订阅</span>}
+                        {isSubscription && <span className="cs-rbadge cs-rbadge--sub">Subscription</span>}
                         <ProtocolBadge proto={preset.relay_protocol} />
                     </div>
                 </div>
@@ -76,7 +76,7 @@ function Step1Picker({
     const grouped = useMemo(() => {
         const map = new Map<string, RelayPreset[]>();
         for (const p of RELAY_PRESETS) {
-            const key = p.group ?? '自定义';
+            const key = p.group ?? 'Custom';
             if (!map.has(key)) map.set(key, []);
             map.get(key)!.push(p);
         }
@@ -86,9 +86,9 @@ function Step1Picker({
     return (
         <div>
             <div className="cs-relay-tip">
-                选一个 <strong>中转服务</strong>，base URL 自动填好，下一步只用粘 API Key。
-                需要在多家 Coding Plan 之间切换额度的话，可以把同一个服务添加多次（用账号名区分）。
-                也支持 <code>codexswitch://</code> deep link 添加。
+                Pick a <strong>relay service</strong>; base URL auto-filled; next step paste API Key.
+                Add the same service multiple times (different account names) to rotate Coding Plan quota.
+                Also <code>codexswitch://</code> deep link.
             </div>
             {GROUPS.map((g) => {
                 const items = grouped.get(g.id) ?? [];
@@ -151,34 +151,34 @@ function Step2Form(props: Step2Props) {
                         <span className="cs-selected-card__name">{preset.name}</span>
                         <ProtocolBadge proto={protocol} />
                     </div>
-                    <div className="cs-selected-card__url">{baseUrl || '（自定义 base URL）'}</div>
+                    <div className="cs-selected-card__url">{baseUrl || '(custom base URL)'}</div>
                     {protocol === 'responses' && modelFallback && (
-                        <div className="cs-rfield__hint">保存后可在 Codex 中选择此中转的模型，无需切换 ChatGPT 账号。</div>
+                        <div className="cs-rfield__hint">After save, pick this relay's models in Codex without switching ChatGPT account.</div>
                     )}
                 </div>
                 <button type="button" className="cs-selected-card__change" onClick={onChangeProvider}>
-                    切换服务
+                    Change service
                 </button>
             </div>
 
             <div className="cs-rgrid2">
                 <div className="cs-rfield">
                     <label className="cs-rfield__label" htmlFor="cs-relay-name">
-                        账号名称<span className="cs-rfield__req">*</span>
+                        Account name<span className="cs-rfield__req">*</span>
                     </label>
                     <input
                         id="cs-relay-name"
                         className="cs-rinput"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        placeholder="例如：工作 · GLM Coding"
+                        placeholder="e.g. Work · GLM Coding"
                     />
                 </div>
 
                 <div className="cs-rfield">
                     <label className="cs-rfield__label" htmlFor="cs-relay-key">
                         API Key<span className="cs-rfield__req">*</span>
-                        <span className="cs-rfield__hint">{preset.auth_prefix ?? 'sk-'}前缀</span>
+                        <span className="cs-rfield__hint">{preset.auth_prefix ?? 'sk-'}prefix</span>
                     </label>
                     <input
                         id="cs-relay-key"
@@ -192,7 +192,7 @@ function Step2Form(props: Step2Props) {
 
                 <div className="cs-rfield cs-rfield--full">
                     <label className="cs-rfield__label" htmlFor="cs-relay-base">
-                        API 地址（可修改）<span className="cs-rfield__req">*</span>
+                        API URL (editable)<span className="cs-rfield__req">*</span>
                     </label>
                     <input
                         id="cs-relay-base"
@@ -201,25 +201,25 @@ function Step2Form(props: Step2Props) {
                         onChange={(e) => setBaseUrl(e.target.value)}
                         placeholder="https://api.example.com/v1"
                     />
-                    <span className="cs-rfield__hint">预设仅提供默认地址；使用自有中转时，请填写该中转的 API 地址和对应 Key。</span>
+                    <span className="cs-rfield__hint">Preset supplies default URL; for your own relay, set its API URL and key.</span>
                 </div>
 
                 {protocol === 'responses' && (
                     <div className="cs-rfield cs-rfield--full">
                         <label className="cs-rfield__label" htmlFor="cs-relay-model">
-                            默认模型 ID（可修改）
+                            Default model ID (editable)
                         </label>
                         <input id="cs-relay-model" className="cs-rinput cs-rinput--mono"
                             value={modelFallback} onChange={(e) => setModelFallback(e.target.value)}
-                            placeholder="填写此 API 实际支持的模型 ID" />
-                        <span className="cs-rfield__hint">会显示在 Codex 模型列表；高级设置可添加其他模型。</span>
+                            placeholder="Model ID this API supports" />
+                        <span className="cs-rfield__hint">Shown in Codex model list; advanced settings can add more models.</span>
                     </div>
                 )}
 
                 <div className="cs-rfield">
                     <label className="cs-rfield__label" htmlFor="cs-relay-proto">
-                        上游协议
-                        <span className="cs-rfield__hint">中转站讲什么 wire format</span>
+                        Upstream protocol
+                        <span className="cs-rfield__hint">Which wire format the relay speaks</span>
                     </label>
                     <select
                         id="cs-relay-proto"
@@ -234,8 +234,8 @@ function Step2Form(props: Step2Props) {
 
                 <div className="cs-rfield">
                     <label className="cs-rfield__label" htmlFor="cs-relay-usage">
-                        余额查询
-                        <span className="cs-rfield__hint">默认自动探测</span>
+                        Balance fetch
+                        <span className="cs-rfield__hint">auto-detect by default</span>
                     </label>
                     <select
                         id="cs-relay-usage"
@@ -243,21 +243,21 @@ function Step2Form(props: Step2Props) {
                         value={usagePreset ?? 'auto'}
                         onChange={(e) => setUsagePreset(e.target.value || null)}
                     >
-                        <option value="auto">自动探测（推荐 · new-api / sub2api 都能识别）</option>
+                        <option value="auto">Auto-detect (recommended · new-api / sub2api)</option>
                         <option value="new_api_dashboard">new_api_dashboard · /v1/dashboard/billing/*</option>
                         <option value="openai_compat">openai_compat · GET /v1/usage</option>
-                        <option value="glm_zhipu">glm_zhipu · GLM 自家 quota</option>
-                        <option value="kimi_coding">kimi_coding · Kimi 编程套餐 5H / 7D</option>
-                        <option value="mimo_token_plan">mimo_token_plan · 需 Cookie</option>
-                        <option value="">不拉取</option>
+                        <option value="glm_zhipu">glm_zhipu · GLM quota API</option>
+                        <option value="kimi_coding">kimi_coding · Kimi coding plan 5H / 7D</option>
+                        <option value="mimo_token_plan">mimo_token_plan · requires Cookie</option>
+                        <option value="">Do not fetch</option>
                     </select>
                 </div>
 
                 {needsCookie && (
                     <div className="cs-rfield cs-rfield--full">
                         <label className="cs-rfield__label" htmlFor="cs-relay-cookie">
-                            MiMo 配额 Cookie
-                            <span className="cs-rfield__hint">从 platform.xiaomimimo.com Network 复制 Cookie header</span>
+                            MiMo quota Cookie
+                            <span className="cs-rfield__hint">Copy Cookie header from Network on platform.xiaomimimo.com</span>
                         </label>
                         <textarea
                             id="cs-relay-cookie"
@@ -282,27 +282,27 @@ function Step2Form(props: Step2Props) {
                         size={14}
                         className={`cs-radv__chevron${advOpen ? ' cs-radv__chevron--open' : ''}`}
                     />
-                    高级设置（模型兜底 / 映射表）
+                    Advanced (model fallback / map)
                 </button>
                 {advOpen && (
                     <div className="cs-radv__body">
                         {protocol !== 'responses' && <div className="cs-rfield">
                             <label className="cs-rfield__label" htmlFor="cs-relay-fallback">
-                                模型兜底
-                                <span className="cs-rfield__hint">客户端发的 model 未命中映射时统一替换</span>
+                                Model fallback
+                                <span className="cs-rfield__hint">Replace client model when not in map</span>
                             </label>
                             <input
                                 id="cs-relay-fallback"
                                 className="cs-rinput cs-rinput--mono"
                                 value={modelFallback}
                                 onChange={(e) => setModelFallback(e.target.value)}
-                                placeholder={preset.model_fallback ?? '留空 = 透传不替换'}
+                                placeholder={preset.model_fallback ?? 'empty = pass through'}
                             />
                         </div>}
                         <div className="cs-rfield">
                             <label className="cs-rfield__label" htmlFor="cs-relay-modelmap">
-                                模型映射表
-                                <span className="cs-rfield__hint">每行 客户端model=中转站model</span>
+                                Model map
+                                <span className="cs-rfield__hint">One line per clientModel=relayModel</span>
                             </label>
                             <textarea
                                 id="cs-relay-modelmap"
@@ -352,7 +352,7 @@ export function AddRelayModal({ isOpen, onClose, onSuccess }: AddRelayModalProps
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // 重置 step 当 modal 关闭
+    // Reset step when modal closes
     useEffect(() => {
         if (!isOpen) {
             setStep(1);
@@ -390,16 +390,16 @@ export function AddRelayModal({ isOpen, onClose, onSuccess }: AddRelayModalProps
     const handleSubmit = async () => {
         if (!picked) return;
         setError(null);
-        if (!name.trim()) { setError('账号名不能为空'); return; }
+        if (!name.trim()) { setError('Account name cannot be empty'); return; }
         if (!/^https?:\/\//.test(baseUrl.trim())) {
-            setError('Base URL 必须以 http:// 或 https:// 开头');
+            setError('Base URL must start with http:// or https://');
             return;
         }
-        // Ollama 等本地推理不需要真 key，宽松校验：非空 + ≥1 字符即可。
-        // 真的 sk- / tp- key 通常 ≥30 字符，这里不卡死方便本地场景。
-        if (apiKey.trim().length < 1) { setError('API Key 不能为空'); return; }
+        // Local Ollama etc.: any non-empty key is OK.
+        // Real sk-/tp- keys are usually ≥30 chars; relaxed for local.
+        if (apiKey.trim().length < 1) { setError('API Key cannot be empty'); return; }
         if (usagePreset === 'mimo_token_plan' && !usageCookie.trim()) {
-            setError('MiMo 配额查询需要粘贴 platform.xiaomimimo.com 的 Cookie；不查配额请把策略改成「不拉取」。');
+            setError('MiMo quota lookup requires a Cookie from platform.xiaomimimo.com; to skip quota, set strategy to "Do not fetch".');
             return;
         }
         setSubmitting(true);
@@ -436,8 +436,8 @@ export function AddRelayModal({ isOpen, onClose, onSuccess }: AddRelayModalProps
                 <div className="cs-relay-modal__header">
                     <div className="cs-relay-modal__title">
                         <div className="cs-relay-modal__icon">⇄</div>
-                        <h2>添加中转</h2>
-                        <span className="cs-relay-modal__sub">选预设 · 填 Key</span>
+                        <h2>Add Relay</h2>
+                        <span className="cs-relay-modal__sub">Pick preset · paste key</span>
                     </div>
                     <button className="cs-relay-modal__close" onClick={onClose}>×</button>
                 </div>
@@ -445,11 +445,11 @@ export function AddRelayModal({ isOpen, onClose, onSuccess }: AddRelayModalProps
                 <div className="cs-relay-steps">
                     <div className={`cs-relay-step${step === 1 ? ' cs-relay-step--active' : ' cs-relay-step--done'}`}>
                         <span className="cs-relay-step__num">{step > 1 ? '✓' : '1'}</span>
-                        选择中转服务
+                        Choose relay
                     </div>
                     <div className={`cs-relay-step${step === 2 ? ' cs-relay-step--active' : ''}`}>
                         <span className="cs-relay-step__num">2</span>
-                        填写凭据
+                        Enter credentials
                     </div>
                 </div>
 
@@ -482,16 +482,16 @@ export function AddRelayModal({ isOpen, onClose, onSuccess }: AddRelayModalProps
                 <div className="cs-relay-modal__footer">
                     {step === 2 ? (
                         <button className="cs-rbtn cs-rbtn--ghost" onClick={handleBack} disabled={submitting}>
-                            ← 返回选择
+                            ← Back to picker
                         </button>
                     ) : (
                         <span style={{ fontSize: 11, color: 'var(--r-fg-muted)' }}>
-                            选完进入下一步，base URL 已自动填好
+                            Next step — base URL already filled
                         </span>
                     )}
                     <div style={{ display: 'flex', gap: 8 }}>
                         <button className="cs-rbtn cs-rbtn--ghost" onClick={onClose} disabled={submitting}>
-                            取消
+                            Cancel
                         </button>
                         {step === 2 && (
                             <button
@@ -499,7 +499,7 @@ export function AddRelayModal({ isOpen, onClose, onSuccess }: AddRelayModalProps
                                 onClick={handleSubmit}
                                 disabled={submitting}
                             >
-                                {submitting ? '导入中…' : '导入中转站'}
+                                {submitting ? 'Importing…' : 'Import relay'}
                             </button>
                         )}
                     </div>

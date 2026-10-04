@@ -59,7 +59,7 @@ pub fn parse_one_file(
 ) -> Result<(String, Vec<ParsedAccount>), String> {
     let raw = base64::engine::general_purpose::STANDARD
         .decode(content_b64.as_bytes())
-        .map_err(|e| format!("base64 解码失败: {}", e))?;
+        .map_err(|e| format!("Base64 decoding failed: {}", e))?;
 
     // 1) zip → cpa 格式（每个 entry 是一个独立账号 json）
     if filename.ends_with(".zip") || raw.starts_with(b"PK\x03\x04") {
@@ -67,13 +67,13 @@ pub fn parse_one_file(
         return Ok(("cpa".to_string(), accounts));
     }
 
-    let text = std::str::from_utf8(&raw).map_err(|_| "文件不是 UTF-8 文本")?;
+    let text = std::str::from_utf8(&raw).map_err(|_| "File is not UTF-8 text")?;
     let trimmed = text.trim();
 
     // 2) JSON 类格式：sub2api / cockpit / cpa-单文件 / native accounts.json
     if trimmed.starts_with('{') || trimmed.starts_with('[') {
         let v: Value =
-            serde_json::from_str(trimmed).map_err(|e| format!("JSON 解析失败: {}", e))?;
+            serde_json::from_str(trimmed).map_err(|e| format!("JSON parsing failed: {}", e))?;
         // sub2api：根对象有 "accounts" 数组 + "proxies" 字段（独有）
         if v.is_object()
             && v.get("accounts").map_or(false, |a| a.is_array())
@@ -113,7 +113,7 @@ pub fn parse_one_file(
         if v.get("accounts").is_some() {
             return Ok(("native".to_string(), parse_native(&v)?));
         }
-        return Err("无法识别的 JSON 结构".to_string());
+        return Err("Unrecognized JSON structure.".to_string());
     }
 
     // 3) 文本格式：四段 RT
@@ -127,18 +127,18 @@ pub fn parse_one_file(
         ));
     }
 
-    Err("无法识别的文件格式".to_string())
+    Err("Unrecognized file format.".to_string())
 }
 
 /// cpa zip：解压每个 .json entry，每个是一个 cpa 单条
 fn parse_cpa_zip(bytes: &[u8]) -> Result<Vec<ParsedAccount>, String> {
     let reader = std::io::Cursor::new(bytes);
-    let mut zip = zip::ZipArchive::new(reader).map_err(|e| format!("zip 解析失败: {}", e))?;
+    let mut zip = zip::ZipArchive::new(reader).map_err(|e| format!("ZIP parsing failed: {}", e))?;
     let mut out = Vec::new();
     for i in 0..zip.len() {
         let mut entry = zip
             .by_index(i)
-            .map_err(|e| format!("zip entry {} 失败: {}", i, e))?;
+            .map_err(|e| format!("Failed to read ZIP entry {}: {}", i, e))?;
         if !entry.is_file() {
             continue;
         }
@@ -151,7 +151,7 @@ fn parse_cpa_zip(bytes: &[u8]) -> Result<Vec<ParsedAccount>, String> {
             continue;
         }
         match serde_json::from_str::<Value>(&content)
-            .map_err(|e| format!("{} 解析 JSON 失败: {}", name, e))
+            .map_err(|e| format!("Failed to parse JSON in {}: {}", name, e))
             .and_then(|v| parse_cpa_single(&v))
         {
             Ok(acc) => out.push(acc),
@@ -166,16 +166,16 @@ fn parse_cpa_single(v: &Value) -> Result<ParsedAccount, String> {
     let email = v
         .get("email")
         .and_then(|x| x.as_str())
-        .ok_or("缺 email")?
+        .ok_or("Missing email")?
         .to_string();
     let access_token = v
         .get("access_token")
         .and_then(|x| x.as_str())
-        .ok_or("缺 access_token")?;
+        .ok_or("Missing access_token")?;
     let refresh_token = v
         .get("refresh_token")
         .and_then(|x| x.as_str())
-        .ok_or("缺 refresh_token")?;
+        .ok_or("Missing refresh_token")?;
     let id_token = v.get("id_token").and_then(|x| x.as_str()).unwrap_or("");
     let account_id = v.get("account_id").and_then(|x| x.as_str()).unwrap_or("");
     let expires_at = v
@@ -216,7 +216,7 @@ fn parse_sub2api(v: &Value) -> Result<Vec<ParsedAccount>, String> {
     let arr = v
         .get("accounts")
         .and_then(|x| x.as_array())
-        .ok_or("无 accounts 数组")?;
+        .ok_or("No accounts array was found")?;
     let mut out = Vec::new();
     for acc in arr {
         let name = acc
@@ -226,7 +226,7 @@ fn parse_sub2api(v: &Value) -> Result<Vec<ParsedAccount>, String> {
             .to_string();
         let cred = acc
             .get("credentials")
-            .ok_or_else(|| format!("{} 缺 credentials", name))?;
+            .ok_or_else(|| format!("{} is missing credentials", name))?;
         let access_token = match cred.get("access_token").and_then(|x| x.as_str()) {
             Some(s) => s,
             None => continue, // 没 access_token 跳过（rt-only 应走四段 RT 路径）
@@ -488,7 +488,7 @@ fn parse_native(v: &Value) -> Result<Vec<ParsedAccount>, String> {
     let accounts = v
         .get("accounts")
         .and_then(|a| a.as_object())
-        .ok_or("native: 缺 accounts 对象")?;
+        .ok_or("native: missing accounts object")?;
     let mut out = Vec::new();
     for (_id, acc) in accounts {
         let email = acc

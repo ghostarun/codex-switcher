@@ -228,14 +228,14 @@ pub fn select_current(
         .accounts
         .get(account_id)
         .filter(|a| eligible(a))
-        .ok_or("中转账号不可用")?;
+        .ok_or("Relay account is unavailable")?;
     let ids = account_models(account);
     if ids.is_empty() {
-        return Err("请先配置此中转的模型 ID".into());
+        return Err("Configure a model ID for this relay first".into());
     }
     let selected = if let Some(model) = upstream {
         if !ids.contains(model) {
-            return Err("该账号未配置这个模型".into());
+            return Err("This account does not have that model configured".into());
         }
         vec![model.to_owned()]
     } else {

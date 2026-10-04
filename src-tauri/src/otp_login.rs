@@ -69,7 +69,7 @@ pub async fn run_login(
         .user_agent(UA)
         .timeout(Duration::from_secs(30))
         .build()
-        .map_err(|e| format!("构建 HTTP client 失败: {e}"))?;
+        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
 
     log_step("1. GET /oauth/authorize 拿初始 cookies + 跟到 /log-in");
     let auth_url = build_auth_url(&pkce.code_challenge, &state, &redirect_uri);
@@ -93,7 +93,7 @@ pub async fn run_login(
         .header("upgrade-insecure-requests", "1")
         .send()
         .await
-        .map_err(|e| format!("/oauth/authorize 请求失败: {e}"))?;
+        .map_err(|e| format!("/oauth/authorize request failed: {e}"))?;
     println!("  → 最终 URL: {}", resp.url());
     println!("  → 状态码: {}", resp.status());
     let _ = resp.text().await;
@@ -134,17 +134,17 @@ pub async fn run_login(
         .body(continue_body)
         .send()
         .await
-        .map_err(|e| format!("authorize/continue 失败: {e}"))?;
+        .map_err(|e| format!("authorize/continue failed: {e}"))?;
     let status = resp.status();
     let body = resp
         .text()
         .await
-        .map_err(|e| format!("authorize/continue 读响应失败: {e}"))?;
+        .map_err(|e| format!("Failed to read authorize/continue response: {e}"))?;
     println!("  → status: {status}");
     println!("  → body: {}", short(&body));
     if !status.is_success() {
         return Err(format!(
-            "authorize/continue 非 200: {status} body={}",
+            "authorize/continue returned a non-success status ({status}): {}",
             short(&body)
         ));
     }
@@ -165,13 +165,13 @@ pub async fn run_login(
         .body("")
         .send()
         .await
-        .map_err(|e| format!("send-otp 失败: {e}"))?;
+        .map_err(|e| format!("send-otp failed: {e}"))?;
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
     println!("  → status: {status}");
     println!("  → body: {}", short(&body));
     if !status.is_success() {
-        return Err(format!("send-otp 非 200: {status} body={}", short(&body)));
+        return Err(format!("send-otp returned a non-success status ({status}): {}", short(&body)));
     }
 
     log_step(&format!(
@@ -195,14 +195,14 @@ pub async fn run_login(
         .body(format!(r#"{{"code":"{}"}}"#, hit.code))
         .send()
         .await
-        .map_err(|e| format!("email-otp/validate 失败: {e}"))?;
+        .map_err(|e| format!("email-otp/validate failed: {e}"))?;
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
     println!("  → status: {status}");
     println!("  → body: {}", short(&body));
     if !status.is_success() {
         return Err(format!(
-            "email-otp/validate 非 200: {status} body={}",
+            "email-otp/validate returned a non-success status ({status}): {}",
             short(&body)
         ));
     }
@@ -242,7 +242,7 @@ pub async fn run_login(
             )
             .send()
             .await
-            .map_err(|e| format!("session_dump 失败: {e}"))?;
+            .map_err(|e| format!("session_dump failed: {e}"))?;
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         println!("  → status: {status}");
@@ -297,7 +297,7 @@ pub async fn run_login(
             .body(body)
             .send()
             .await
-            .map_err(|e| format!("workspace/select 失败: {e}"))?;
+            .map_err(|e| format!("workspace/select failed: {e}"))?;
         let status = resp.status();
         // 当前 client 设置了对 localhost 停下；这里允许的话 reqwest 会 follow 到非 localhost 的 redirect。
         // 我们手动检查 Location header 提取 continue_url。
@@ -478,7 +478,7 @@ async fn follow_until_callback(
             )
             .send()
             .await
-            .map_err(|e| format!("follow {url} 失败: {e}"))?;
+            .map_err(|e| format!("Failed to follow {url}: {e}"))?;
         let final_u = resp.url().to_string();
         let status = resp.status();
         // 3xx 带 Location：reqwest 的自定义 redirect 策略在 host=localhost 时 stop，会把 3xx 原样返回
@@ -528,17 +528,17 @@ async fn follow_until_callback(
             short(&body)
         ));
     }
-    Err("follow_until_callback 超过 15 跳".into())
+    Err("Exceeded 15 redirects while waiting for the callback".into())
 }
 
 fn extract_code_from_url(url: &str) -> Result<String, String> {
-    let u = reqwest::Url::parse(url).map_err(|e| format!("URL 解析失败: {e}"))?;
+    let u = reqwest::Url::parse(url).map_err(|e| format!("Failed to parse URL: {e}"))?;
     for (k, v) in u.query_pairs() {
         if k == "code" {
             return Ok(v.into_owned());
         }
     }
-    Err(format!("URL 里没有 code 参数: {url}"))
+    Err(format!("URL is missing the code parameter: {url}"))
 }
 
 fn pluck_str(v: &Value, keys: &[&str]) -> Option<String> {

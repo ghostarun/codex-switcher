@@ -14,26 +14,26 @@ import './SessionRoutes.css';
 function accountBadge(account: Account | undefined): { label: string; className: string } | null {
     if (!account) return null;
     const kind = effectiveKind(account);
-    if (kind === 'chatgpt_oauth') return { label: '订阅', className: 'badge kind-chatgpt' };
+    if (kind === 'chatgpt_oauth') return { label: 'Subscription', className: 'badge kind-chatgpt' };
     if (kind === 'openai_key') return { label: 'API', className: 'badge kind-openai' };
     switch (account.relay_category) {
         case 'coding_plan':
             return { label: 'Plan', className: 'badge kind-codingplan' };
         case 'third_party':
-            return { label: '三方', className: 'badge kind-thirdparty' };
+            return { label: 'Third-party', className: 'badge kind-thirdparty' };
         case 'aggregator':
         default:
-            return { label: '中转', className: 'badge kind-relay' };
+            return { label: 'Relay', className: 'badge kind-relay' };
     }
 }
 
 function accountWarning(account: Account | undefined): string | null {
-    if (!account) return '目标账号已被删除';
+    if (!account) return 'Target account was deleted';
     const flags: string[] = [];
-    if (account.is_banned) flags.push('已封号');
-    if (account.is_token_invalid) flags.push('Token 失效');
-    if (account.is_logged_out) flags.push('需重新登录');
-    return flags.length ? `目标账号异常：${flags.join(' · ')}` : null;
+    if (account.is_banned) flags.push('Banned');
+    if (account.is_token_invalid) flags.push('Token invalid');
+    if (account.is_logged_out) flags.push('Re-login required');
+    return flags.length ? `Target account issue: ${flags.join(' · ')}` : null;
 }
 
 export function SessionRoutes() {
@@ -158,12 +158,12 @@ export function SessionRoutes() {
             <div className="sr-topbar">
                 <div className="sr-topbar__left">
                     <button className="sr-btn-add" onClick={() => setShowAddModal(true)}>
-                        + 添加路由
+                        + Add route
                     </button>
                 </div>
                 <input
                     className="sr-topbar__search"
-                    placeholder="搜索 label / session_id / 账号…"
+                    placeholder="Search label / session_id / account…"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                 />
@@ -172,12 +172,12 @@ export function SessionRoutes() {
                         className="sr-iconbtn"
                         onClick={load}
                         disabled={loading}
-                        title="刷新"
+                        title="Refresh"
                     >
                         <RefreshCw size={14} />
                     </button>
                     <span className="sr-topbar__count">
-                        共 <strong>{routes.length}</strong> 条规则，启用 <strong>{enabledCount}</strong> 条
+                        <strong>{routes.length}</strong> rule(s), <strong>{enabledCount}</strong> enabled
                     </span>
                 </div>
             </div>
@@ -185,15 +185,15 @@ export function SessionRoutes() {
             {error && <div className="sr-error">{error}</div>}
 
             {loading ? (
-                <div className="sr-empty">加载路由规则…</div>
+                <div className="sr-empty">Loading route rules…</div>
             ) : routes.length === 0 ? (
                 <div className="sr-empty">
-                    还没有路由规则。点 <strong>+ 添加</strong>。
+                    No route rules yet. Click <strong>+ Add</strong>.
                     <br />
-                    指定 codex 会话强制使用某个账号，绕过全局自动切号。
+                    Pin a codex session to an account; bypass global auto-switch.
                 </div>
             ) : filtered.length === 0 ? (
-                <div className="sr-empty">没有匹配「{search}」的规则。</div>
+                <div className="sr-empty">No rules match "{search}".</div>
             ) : (
                 <div className="sr-list">
                     {filtered.map((r) => {
@@ -207,7 +207,7 @@ export function SessionRoutes() {
                                 className={`sr-card${r.enabled ? '' : ' sr-card--disabled'}`}
                             >
                                 <div className="sr-card__row1">
-                                    <label className="sr-switch" title={r.enabled ? '已启用' : '已禁用'}>
+                                    <label className="sr-switch" title={r.enabled ? 'Enabled' : 'Disabled'}>
                                         <input
                                             type="checkbox"
                                             checked={r.enabled}
@@ -222,14 +222,14 @@ export function SessionRoutes() {
                                         <button
                                             className="sr-iconbtn"
                                             onClick={() => openEdit(r)}
-                                            title="编辑备注"
+                                            title="Edit label"
                                         >
                                             <Pencil size={13} />
                                         </button>
                                         <button
                                             className="sr-iconbtn"
                                             onClick={() => setDeleteTarget(r)}
-                                            title="删除路由"
+                                            title="Delete route"
                                         >
                                             <Trash2 size={13} />
                                         </button>
@@ -241,9 +241,9 @@ export function SessionRoutes() {
                                     <span
                                         className={`sr-card__sid${copiedId === r.id ? ' sr-card__sid--copied' : ''}`}
                                         onClick={() => handleCopySid(r)}
-                                        title="点击复制完整 session_id"
+                                        title="Click to copy full session_id"
                                     >
-                                        {copiedId === r.id ? '已复制 ✓' : r.session_id}
+                                        {copiedId === r.id ? 'Copied ✓' : r.session_id}
                                     </span>
                                 </div>
 
@@ -256,17 +256,17 @@ export function SessionRoutes() {
                                         </>
                                     ) : (
                                         <span className="sr-card__account-missing">
-                                            未知账号（已删除？ id: {r.account_id.slice(0, 8)}）
+                                            Unknown account (deleted? id:{r.account_id.slice(0, 8)})
                                         </span>
                                     )}
                                 </div>
 
                                 <div className="sr-card__row4">
-                                    <span>命中 {r.hit_count} 次</span>
+                                    <span>{r.hit_count} hit(s)</span>
                                     <span className="sr-card__meta-sep">·</span>
-                                    <span>最近 {r.last_hit_at ? formatRelativeTime(r.last_hit_at) : '从未'}</span>
+                                    <span>Last {r.last_hit_at ? formatRelativeTime(r.last_hit_at) : 'never'}</span>
                                     <span className="sr-card__meta-sep">·</span>
-                                    <span>创建于 {formatRelativeTime(r.created_at)}</span>
+                                    <span>Created {formatRelativeTime(r.created_at)}</span>
                                 </div>
 
                                 {warning && <div className="sr-card__warn">{warning}</div>}
@@ -289,10 +289,10 @@ export function SessionRoutes() {
             {editTarget && (
                 <div className="sr-edit-modal__overlay" onClick={() => !editSaving && setEditTarget(null)}>
                     <div className="sr-edit-modal__panel" onClick={(e) => e.stopPropagation()}>
-                        <div className="sr-edit-modal__title">编辑备注</div>
+                        <div className="sr-edit-modal__title">Edit label</div>
                         <input
                             className="sr-edit-modal__input"
-                            placeholder="例如：GLM 跑文档"
+                            placeholder="e.g. GLM for docs"
                             value={editLabel}
                             onChange={(e) => setEditLabel(e.target.value)}
                             maxLength={64}
@@ -308,14 +308,14 @@ export function SessionRoutes() {
                                 onClick={() => setEditTarget(null)}
                                 disabled={editSaving}
                             >
-                                取消
+                                Cancel
                             </button>
                             <button
                                 className="sr-btn-confirm"
                                 onClick={submitEdit}
                                 disabled={editSaving}
                             >
-                                {editSaving ? '保存中…' : '保存'}
+                                {editSaving ? 'Saving…' : 'Save'}
                             </button>
                         </div>
                     </div>
@@ -325,17 +325,17 @@ export function SessionRoutes() {
             {/* Delete confirm */}
             <ConfirmModal
                 isOpen={!!deleteTarget}
-                title="确认删除路由"
+                title="Confirm delete route"
                 message={
                     <>
-                        <p>确认删除路由「{deleteTarget?.label || shortSessionId(deleteTarget?.session_id ?? '')}」？</p>
+                        <p>Confirm delete route "{deleteTarget?.label || shortSessionId(deleteTarget?.session_id ?? '')}"?</p>
                         <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 8 }}>
-                            删除后该 session 将恢复全局自动切号。
+                            After delete this session uses global auto-switch again.
                         </p>
                     </>
                 }
-                confirmText="删除"
-                cancelText="取消"
+                confirmText="Delete"
+                cancelText="Cancel"
                 onConfirm={confirmDelete}
                 onCancel={() => setDeleteTarget(null)}
                 isLoading={deleting}

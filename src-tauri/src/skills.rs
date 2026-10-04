@@ -159,13 +159,13 @@ pub fn init_ssot() -> Result<(), String> {
     // 即使 SSOT 和 Codex 已经准备好，也不能在这里提前返回；其他 CLI
     // （尤其是 Claude）的 skills 链接可能被外部工具删除，需要继续补齐。
     if !ssot.exists() {
-        std::fs::create_dir_all(&ssot).map_err(|e| format!("创建 SSOT 目录失败: {}", e))?;
+        std::fs::create_dir_all(&ssot).map_err(|e| format!("Failed to create the SSOT directory: {}", e))?;
 
         // 如果 ~/.codex/skills/ 是真实目录（有内容），迁移过来
         if codex_skills.exists() && codex_skills.is_dir() && !codex_skills.is_symlink() {
             println!("[Skills] 迁移 ~/.codex/skills/ → SSOT...");
             let entries: Vec<_> = std::fs::read_dir(&codex_skills)
-                .map_err(|e| format!("读取目录失败: {}", e))?
+                .map_err(|e| format!("Failed to read directory: {}", e))?
                 .flatten()
                 .collect();
 
@@ -237,7 +237,7 @@ fn migrate_legacy_antigravity_skills(ssot: &std::path::Path) -> Result<(), Strin
             .unwrap_or(false)
         {
             std::fs::remove_file(&legacy)
-                .map_err(|e| format!("移除旧 Antigravity skills 链接失败: {}", e))?;
+                .map_err(|e| format!("Failed to remove the old Antigravity skills link: {}", e))?;
             println!("[Skills] 已移除旧 Antigravity skills 链接");
         }
         return Ok(());
@@ -246,7 +246,7 @@ fn migrate_legacy_antigravity_skills(ssot: &std::path::Path) -> Result<(), Strin
     if legacy.is_dir() {
         migrate_existing_app_skills_to_ssot("antigravity-legacy", &legacy, ssot)?;
         std::fs::remove_dir_all(&legacy)
-            .map_err(|e| format!("移除旧 Antigravity skills 目录失败: {}", e))?;
+            .map_err(|e| format!("Failed to remove the old Antigravity skills directory: {}", e))?;
         println!("[Skills] 已迁移旧 Antigravity skills 目录");
     }
 
@@ -268,7 +268,7 @@ fn cleanup_legacy_antigravity_root_skills() -> Result<(), String> {
             .unwrap_or(false)
         {
             std::fs::remove_file(&legacy)
-                .map_err(|e| format!("移除旧 Antigravity skills 链接失败: {}", e))?;
+                .map_err(|e| format!("Failed to remove the old Antigravity skills link: {}", e))?;
         }
         return Ok(());
     }
@@ -288,20 +288,20 @@ fn cleanup_legacy_antigravity_root_skills() -> Result<(), String> {
         let path = legacy.join(name);
         if path.is_dir() {
             std::fs::remove_dir_all(&path)
-                .map_err(|e| format!("移除旧 Antigravity skill 失败: {}", e))?;
+                .map_err(|e| format!("Failed to remove the old Antigravity skill: {}", e))?;
         } else if path.exists() {
             std::fs::remove_file(&path)
-                .map_err(|e| format!("移除旧 Antigravity skill 失败: {}", e))?;
+                .map_err(|e| format!("Failed to remove the old Antigravity skill: {}", e))?;
         }
     }
     std::fs::remove_file(&manifest)
-        .map_err(|e| format!("移除旧 Antigravity skills manifest 失败: {}", e))?;
+        .map_err(|e| format!("Failed to remove the old Antigravity skills manifest: {}", e))?;
     if std::fs::read_dir(&legacy)
         .map(|mut entries| entries.next().is_none())
         .unwrap_or(false)
     {
         std::fs::remove_dir(&legacy)
-            .map_err(|e| format!("移除旧 Antigravity skills 目录失败: {}", e))?;
+            .map_err(|e| format!("Failed to remove the old Antigravity skills directory: {}", e))?;
     }
     Ok(())
 }
@@ -315,18 +315,18 @@ const ANTIGRAVITY_MANIFEST: &str = ".codex-switcher-managed.json";
 /// symlink 策略。builtin/skills 不在这个函数的路径范围内，始终保持平台自带内容。
 fn sync_antigravity_skills_dir(ssot: &std::path::Path) -> Result<(), String> {
     let target =
-        app_skills_dir("antigravity").ok_or_else(|| "Antigravity skills 目录不可用".to_string())?;
+        app_skills_dir("antigravity").ok_or_else(|| "The Antigravity skills directory is unavailable".to_string())?;
 
     if target.is_symlink() {
         std::fs::remove_file(&target)
-            .map_err(|e| format!("移除 Antigravity skills symlink 失败: {}", e))?;
+            .map_err(|e| format!("Failed to remove the Antigravity skills symlink: {}", e))?;
     } else if target.exists() && !target.is_dir() {
-        return Err(format!("Antigravity skills 路径不是目录: {:?}", target));
+        return Err(format!("Antigravity skills path is not a directory: {:?}", target));
     }
 
     if !target.exists() {
         std::fs::create_dir_all(&target)
-            .map_err(|e| format!("创建 Antigravity skills 目录失败: {}", e))?;
+            .map_err(|e| format!("Failed to create the Antigravity skills directory: {}", e))?;
     }
 
     let manifest = target.join(ANTIGRAVITY_MANIFEST);
@@ -345,10 +345,10 @@ fn sync_antigravity_skills_dir(ssot: &std::path::Path) -> Result<(), String> {
         let path = target.join(name);
         if path.is_dir() {
             std::fs::remove_dir_all(&path)
-                .map_err(|e| format!("移除过期 Antigravity skill {} 失败: {}", name, e))?;
+                .map_err(|e| format!("Failed to remove expired Antigravity skill {}: {}", name, e))?;
         } else if path.exists() {
             std::fs::remove_file(&path)
-                .map_err(|e| format!("移除过期 Antigravity skill {} 失败: {}", name, e))?;
+                .map_err(|e| format!("Failed to remove expired Antigravity skill {}: {}", name, e))?;
         }
     }
 
@@ -358,19 +358,19 @@ fn sync_antigravity_skills_dir(ssot: &std::path::Path) -> Result<(), String> {
         if destination.exists() {
             if destination.is_dir() {
                 std::fs::remove_dir_all(&destination)
-                    .map_err(|e| format!("覆盖 Antigravity skill {} 失败: {}", name, e))?;
+                    .map_err(|e| format!("Failed to overwrite Antigravity skill {}: {}", name, e))?;
             } else {
                 std::fs::remove_file(&destination)
-                    .map_err(|e| format!("覆盖 Antigravity skill {} 失败: {}", name, e))?;
+                    .map_err(|e| format!("Failed to overwrite Antigravity skill {}: {}", name, e))?;
             }
         }
         copy_dir_recursive(&source, &destination)?;
     }
 
     let content = serde_json::to_string_pretty(&names)
-        .map_err(|e| format!("生成 Antigravity skills manifest 失败: {}", e))?;
+        .map_err(|e| format!("Failed to generate the Antigravity skills manifest: {}", e))?;
     std::fs::write(&manifest, content)
-        .map_err(|e| format!("写入 Antigravity skills manifest 失败: {}", e))?;
+        .map_err(|e| format!("Failed to write the Antigravity skills manifest: {}", e))?;
     println!("[Skills] Antigravity 已镜像 {} 个 skill", names.len());
     Ok(())
 }
@@ -399,15 +399,15 @@ fn disable_antigravity_skills() -> Result<(), String> {
         let path = target.join(name);
         if path.is_dir() {
             std::fs::remove_dir_all(&path)
-                .map_err(|e| format!("移除 Antigravity skill 失败: {}", e))?;
+                .map_err(|e| format!("Failed to remove Antigravity skill: {}", e))?;
         } else if path.exists() {
             std::fs::remove_file(&path)
-                .map_err(|e| format!("移除 Antigravity skill 失败: {}", e))?;
+                .map_err(|e| format!("Failed to remove Antigravity skill: {}", e))?;
         }
     }
     if manifest.exists() {
         std::fs::remove_file(&manifest)
-            .map_err(|e| format!("移除 Antigravity skills manifest 失败: {}", e))?;
+            .map_err(|e| format!("Failed to remove the Antigravity skills manifest: {}", e))?;
     }
     Ok(())
 }
@@ -461,7 +461,7 @@ fn link_app_to_ssot(app: &str) -> Result<(), String> {
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(&ssot, &target)
-            .map_err(|e| format!("创建 symlink 失败: {}", e))?;
+            .map_err(|e| format!("Failed to create symlink: {}", e))?;
         println!("[Skills] {} → SSOT (symlink)", app);
     }
 
@@ -511,8 +511,8 @@ fn migrate_existing_app_skills_to_ssot(
         .join("skills-backup")
         .join(format!("{}-{}", app, Utc::now().format("%Y%m%d%H%M%S")));
 
-    for entry in std::fs::read_dir(target).map_err(|e| format!("读取目录失败: {}", e))? {
-        let entry = entry.map_err(|e| format!("读取条目失败: {}", e))?;
+    for entry in std::fs::read_dir(target).map_err(|e| format!("Failed to read directory: {}", e))? {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
         let name = entry.file_name();
         let src = entry.path();
         let dst = ssot.join(&name);
@@ -524,7 +524,7 @@ fn migrate_existing_app_skills_to_ssot(
                 if let Some(parent) = dst.parent() {
                     let _ = std::fs::create_dir_all(parent);
                 }
-                std::fs::copy(&src, &dst).map_err(|e| format!("复制文件失败: {}", e))?;
+                std::fs::copy(&src, &dst).map_err(|e| format!("Failed to copy file: {}", e))?;
             }
             continue;
         }
@@ -536,7 +536,7 @@ fn migrate_existing_app_skills_to_ssot(
             if let Some(parent) = backup.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            std::fs::copy(&src, &backup).map_err(|e| format!("备份文件失败: {}", e))?;
+            std::fs::copy(&src, &backup).map_err(|e| format!("Failed to back up file: {}", e))?;
         }
     }
 
@@ -569,8 +569,8 @@ impl SkillStore {
 
     pub fn save(data: &SkillData) -> Result<(), String> {
         let path = data_path();
-        let json = serde_json::to_string_pretty(data).map_err(|e| format!("序列化失败: {}", e))?;
-        std::fs::write(&path, json).map_err(|e| format!("写入失败: {}", e))
+        let json = serde_json::to_string_pretty(data).map_err(|e| format!("Serialization failed: {}", e))?;
+        std::fs::write(&path, json).map_err(|e| format!("Write failed: {}", e))
     }
 
     /// 扫描 SSOT 目录，补录未记录的 skills
@@ -631,7 +631,7 @@ impl SkillStore {
     /// 切换某个 app 的整个 skills 目录 symlink
     /// 新架构：整个目录是 symlink，不需要 per-skill 同步
     pub fn toggle_app_link(app: &str, enabled: bool) -> Result<(), String> {
-        let target = app_skills_dir(app).ok_or_else(|| format!("未知 app: {}", app))?;
+        let target = app_skills_dir(app).ok_or_else(|| format!("Unknown app: {}", app))?;
 
         if enabled {
             link_app_to_ssot(app)?;
@@ -765,13 +765,13 @@ impl SkillStore {
             .get(&url)
             .send()
             .await
-            .map_err(|e| format!("下载失败: {}", e))?;
+            .map_err(|e| format!("Download failed: {}", e))?;
 
         if !resp.status().is_success() {
-            return Err(format!("下载失败: HTTP {}", resp.status()));
+            return Err(format!("Download failed: HTTP {}", resp.status()));
         }
 
-        let bytes = resp.bytes().await.map_err(|e| format!("读取失败: {}", e))?;
+        let bytes = resp.bytes().await.map_err(|e| format!("Read failed: {}", e))?;
 
         let tmp = std::env::temp_dir().join(format!("codex-skill-install-{}", skill.directory));
         let _ = std::fs::remove_dir_all(&tmp);
@@ -781,7 +781,7 @@ impl SkillStore {
 
         // 找到 skill 目录
         let skill_src = find_skill_dir(&tmp, &skill.directory)
-            .ok_or_else(|| format!("在仓库中未找到 skill: {}", skill.directory))?;
+            .ok_or_else(|| format!("Skill not found in repository: {}", skill.directory))?;
 
         // 复制到 SSOT
         let target = ssot_dir().join(&skill.directory);
@@ -820,7 +820,7 @@ impl SkillStore {
             .skills
             .iter()
             .find(|s| s.id == skill_id)
-            .ok_or_else(|| format!("skill 不存在: {}", skill_id))?
+            .ok_or_else(|| format!("Skill does not exist: {}", skill_id))?
             .clone();
 
         // 从 SSOT 删除（所有 app 通过 symlink 指向 SSOT，自动同步）
@@ -946,12 +946,12 @@ fn extract_zip(data: &[u8], target: &std::path::Path) -> Result<(), String> {
     use std::io::{Cursor, Read, Write};
 
     let reader = Cursor::new(data);
-    let mut archive = zip::ZipArchive::new(reader).map_err(|e| format!("打开 ZIP 失败: {}", e))?;
+    let mut archive = zip::ZipArchive::new(reader).map_err(|e| format!("Failed to open ZIP: {}", e))?;
 
     for i in 0..archive.len() {
         let mut file = archive
             .by_index(i)
-            .map_err(|e| format!("读取 ZIP 条目失败: {}", e))?;
+            .map_err(|e| format!("Failed to read ZIP entry: {}", e))?;
 
         let name = file.name().to_string();
         let out_path = target.join(&name);
@@ -963,12 +963,12 @@ fn extract_zip(data: &[u8], target: &std::path::Path) -> Result<(), String> {
                 let _ = std::fs::create_dir_all(parent);
             }
             let mut out =
-                std::fs::File::create(&out_path).map_err(|e| format!("创建文件失败: {}", e))?;
+                std::fs::File::create(&out_path).map_err(|e| format!("Failed to create file: {}", e))?;
             let mut buf = Vec::new();
             file.read_to_end(&mut buf)
-                .map_err(|e| format!("读取失败: {}", e))?;
+                .map_err(|e| format!("Read failed: {}", e))?;
             out.write_all(&buf)
-                .map_err(|e| format!("写入失败: {}", e))?;
+                .map_err(|e| format!("Write failed: {}", e))?;
         }
     }
 
@@ -977,17 +977,17 @@ fn extract_zip(data: &[u8], target: &std::path::Path) -> Result<(), String> {
 
 /// 递归复制目录
 fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
-    std::fs::create_dir_all(dst).map_err(|e| format!("创建目录失败: {}", e))?;
+    std::fs::create_dir_all(dst).map_err(|e| format!("Failed to create directory: {}", e))?;
 
-    for entry in std::fs::read_dir(src).map_err(|e| format!("读取目录失败: {}", e))? {
-        let entry = entry.map_err(|e| format!("读取条目失败: {}", e))?;
+    for entry in std::fs::read_dir(src).map_err(|e| format!("Failed to read directory: {}", e))? {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
 
         if src_path.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
-            std::fs::copy(&src_path, &dst_path).map_err(|e| format!("复制文件失败: {}", e))?;
+            std::fs::copy(&src_path, &dst_path).map_err(|e| format!("Failed to copy file: {}", e))?;
         }
     }
 
@@ -1064,7 +1064,7 @@ pub fn zip_skill_dir(name: &str) -> Result<Vec<u8>, String> {
 
     let root = ssot_dir().join(name);
     if !root.is_dir() {
-        return Err(format!("skill 目录不存在: {}", name));
+        return Err(format!("Skill directory does not exist: {}", name));
     }
 
     let buf: Vec<u8> = Vec::new();
@@ -1083,7 +1083,7 @@ pub fn zip_skill_dir(name: &str) -> Result<Vec<u8>, String> {
         opts: &SimpleFileOptions,
         dir_opts: &SimpleFileOptions,
     ) -> Result<(), String> {
-        let rd = std::fs::read_dir(dir).map_err(|e| format!("读取目录失败 {:?}: {}", dir, e))?;
+        let rd = std::fs::read_dir(dir).map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
         for entry in rd.flatten() {
             let path = entry.path();
             let name = match path.file_name().and_then(|n| n.to_str()) {
@@ -1098,7 +1098,7 @@ pub fn zip_skill_dir(name: &str) -> Result<Vec<u8>, String> {
                 let rel_str = rel.to_string_lossy().replace('\\', "/");
                 let entry_name = format!("{}/", rel_str);
                 zip.add_directory(entry_name, *dir_opts)
-                    .map_err(|e| format!("添加目录失败: {}", e))?;
+                    .map_err(|e| format!("Failed to add directory: {}", e))?;
                 walk(&path, prefix, zip, opts, dir_opts)?;
             } else if path.is_file() {
                 if should_skip_file(&name) {
@@ -1116,14 +1116,14 @@ pub fn zip_skill_dir(name: &str) -> Result<Vec<u8>, String> {
                     let _ = meta;
                 }
                 zip.start_file(rel_str, file_opts)
-                    .map_err(|e| format!("开始文件失败: {}", e))?;
+                    .map_err(|e| format!("Failed to start file: {}", e))?;
                 let mut f = std::fs::File::open(&path)
-                    .map_err(|e| format!("打开文件失败 {:?}: {}", path, e))?;
+                    .map_err(|e| format!("Failed to open file {:?}: {}", path, e))?;
                 let mut data = Vec::new();
                 f.read_to_end(&mut data)
-                    .map_err(|e| format!("读取文件失败: {}", e))?;
+                    .map_err(|e| format!("Failed to read file: {}", e))?;
                 zip.write_all(&data)
-                    .map_err(|e| format!("写入 zip 失败: {}", e))?;
+                    .map_err(|e| format!("Failed to write ZIP: {}", e))?;
             }
         }
         Ok(())
@@ -1132,7 +1132,7 @@ pub fn zip_skill_dir(name: &str) -> Result<Vec<u8>, String> {
     walk(&root, &ssot_dir(), &mut zip, &opts, &dir_opts)?;
     let cursor = zip
         .finish()
-        .map_err(|e| format!("finish zip 失败: {}", e))?;
+        .map_err(|e| format!("Failed to finish ZIP: {}", e))?;
     Ok(cursor.into_inner())
 }
 
@@ -1142,11 +1142,11 @@ pub fn extract_skill_zip(name: &str, bytes: &[u8]) -> Result<(), String> {
     use zip::ZipArchive;
 
     if name.is_empty() || name.contains('/') || name.contains('\\') || name == "." || name == ".." {
-        return Err(format!("非法 skill 名: {}", name));
+        return Err(format!("Invalid skill name: {}", name));
     }
 
     let ssot = ssot_dir();
-    std::fs::create_dir_all(&ssot).map_err(|e| format!("创建 SSOT 失败: {}", e))?;
+    std::fs::create_dir_all(&ssot).map_err(|e| format!("Failed to create SSOT: {}", e))?;
 
     let target = ssot.join(name);
     let ts = chrono::Utc::now().format("%Y%m%d%H%M%S");
@@ -1154,43 +1154,43 @@ pub fn extract_skill_zip(name: &str, bytes: &[u8]) -> Result<(), String> {
     let backup = ssot.join(format!(".{}.backup.{}", name, ts));
 
     let _ = std::fs::remove_dir_all(&staging);
-    std::fs::create_dir_all(&staging).map_err(|e| format!("创建 staging 失败: {}", e))?;
+    std::fs::create_dir_all(&staging).map_err(|e| format!("Failed to create staging directory: {}", e))?;
 
     let mut archive =
-        ZipArchive::new(Cursor::new(bytes)).map_err(|e| format!("打开 zip 失败: {}", e))?;
+        ZipArchive::new(Cursor::new(bytes)).map_err(|e| format!("Failed to open ZIP: {}", e))?;
 
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
-            .map_err(|e| format!("读取 zip 条目失败: {}", e))?;
+            .map_err(|e| format!("Failed to read ZIP entry: {}", e))?;
         let raw_name = match entry.enclosed_name() {
             Some(p) => p.to_path_buf(),
-            None => return Err(format!("zip 条目名非法: {}", entry.name())),
+            None => return Err(format!("Invalid ZIP entry name: {}", entry.name())),
         };
         // 顶层必须是 <name>/...
         let mut comps = raw_name.components();
         let first = comps
             .next()
-            .ok_or_else(|| "zip 条目缺少顶层目录".to_string())?;
+            .ok_or_else(|| "ZIP entry is missing a top-level directory".to_string())?;
         if first.as_os_str() != std::ffi::OsStr::new(name) {
-            return Err(format!("zip 顶层目录 {:?} 与期望 {} 不一致", first, name));
+            return Err(format!("ZIP top-level directory {:?} does not match expected {}", first, name));
         }
         let rel: std::path::PathBuf = comps.collect();
         let dest = staging.join(&rel);
         if entry.is_dir() {
-            std::fs::create_dir_all(&dest).map_err(|e| format!("创建目录失败: {}", e))?;
+            std::fs::create_dir_all(&dest).map_err(|e| format!("Failed to create directory: {}", e))?;
         } else {
             if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| format!("创建父目录失败: {}", e))?;
+                std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create parent directory: {}", e))?;
             }
             let mut out = std::fs::File::create(&dest)
-                .map_err(|e| format!("创建文件失败 {:?}: {}", dest, e))?;
+                .map_err(|e| format!("Failed to create file {:?}: {}", dest, e))?;
             let mut data = Vec::new();
             entry
                 .read_to_end(&mut data)
-                .map_err(|e| format!("读取 zip 内容失败: {}", e))?;
+                .map_err(|e| format!("Failed to read ZIP contents: {}", e))?;
             out.write_all(&data)
-                .map_err(|e| format!("写入文件失败: {}", e))?;
+                .map_err(|e| format!("Failed to write file: {}", e))?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -1203,7 +1203,7 @@ pub fn extract_skill_zip(name: &str, bytes: &[u8]) -> Result<(), String> {
 
     // 原子替换：如果已有 target，先 rename 到 backup，再 rename staging 到 target
     if target.exists() {
-        std::fs::rename(&target, &backup).map_err(|e| format!("备份原目录失败: {}", e))?;
+        std::fs::rename(&target, &backup).map_err(|e| format!("Failed to back up the original directory: {}", e))?;
     }
     match std::fs::rename(&staging, &target) {
         Ok(_) => {
@@ -1216,7 +1216,7 @@ pub fn extract_skill_zip(name: &str, bytes: &[u8]) -> Result<(), String> {
                 let _ = std::fs::rename(&backup, &target);
             }
             let _ = std::fs::remove_dir_all(&staging);
-            Err(format!("替换 skill 失败: {}", e))
+            Err(format!("Failed to replace skill: {}", e))
         }
     }
 }

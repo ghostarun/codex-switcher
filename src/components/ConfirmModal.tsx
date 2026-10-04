@@ -9,7 +9,6 @@ interface ConfirmModalProps {
     onConfirm: () => void;
     onCancel: () => void;
     isLoading?: boolean;
-    loadingText?: string;
     extraActionText?: string;
     onExtraAction?: () => void;
 }
@@ -18,12 +17,11 @@ export function ConfirmModal({
     isOpen,
     title,
     message,
-    confirmText = '确认',
-    cancelText = '取消',
+    confirmText = 'Confirm',
+    cancelText = 'Cancel',
     onConfirm,
     onCancel,
     isLoading = false,
-    loadingText = '正在切换...',
     extraActionText,
     onExtraAction,
 }: ConfirmModalProps) {
@@ -42,17 +40,17 @@ export function ConfirmModal({
                 </div>
 
                 <div className="confirm-footer">
-                    <button className="btn-cancel" onClick={onCancel} disabled={isLoading}>
-                        {cancelText}
-                    </button>
-                    {extraActionText && onExtraAction && (
-                        <button className="btn-extra" onClick={onExtraAction} disabled={isLoading}>
-                            {extraActionText}
-                        </button>
-                    )}
-                    <button className="btn-confirm" onClick={onConfirm} disabled={isLoading}>
-                        {isLoading ? loadingText : confirmText}
-                    </button>
+                            <button className="btn-cancel" onClick={onCancel} disabled={isLoading}>
+                                {cancelText}
+                            </button>
+                            {extraActionText && onExtraAction && (
+                                <button className="btn-extra" onClick={onExtraAction} disabled={isLoading}>
+                                    {extraActionText}
+                                </button>
+                            )}
+                            <button className="btn-confirm" onClick={onConfirm} disabled={isLoading}>
+                                {isLoading ? 'Switching...' : confirmText}
+                            </button>
                 </div>
             </div>
         </div>

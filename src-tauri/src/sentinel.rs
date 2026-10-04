@@ -135,12 +135,12 @@ pub async fn fetch_sentinel_token(
         .body(body)
         .send()
         .await
-        .map_err(|e| format!("sentinel/req 请求失败: {e}"))?;
+        .map_err(|e| format!("sentinel/req request failed: {e}"))?;
     let status = resp.status();
     let text = resp
         .text()
         .await
-        .map_err(|e| format!("sentinel/req 读取响应失败: {e}"))?;
+        .map_err(|e| format!("Failed to read sentinel/req response: {e}"))?;
     if !status.is_success() {
         return Err(format!(
             "sentinel/req 返回 {status}: {}",
@@ -148,7 +148,7 @@ pub async fn fetch_sentinel_token(
         ));
     }
     let v: Value =
-        serde_json::from_str(&text).map_err(|e| format!("sentinel/req JSON 解析失败: {e}"))?;
+        serde_json::from_str(&text).map_err(|e| format!("Failed to parse sentinel/req JSON: {e}"))?;
     v.get("token")
         .and_then(|x| x.as_str())
         .map(|s| s.to_string())

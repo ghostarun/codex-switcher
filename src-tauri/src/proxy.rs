@@ -128,7 +128,7 @@ async fn silent_refresh_current(state: &ProxyState) -> SilentRefreshOutcome {
     let (current_id, remote_mode, primary, fallback, secret) = {
         let store = match state.store.lock() {
             Ok(s) => s,
-            Err(_) => return SilentRefreshOutcome::OtherError("store lock 失败".into()),
+            Err(_) => return SilentRefreshOutcome::OtherError("Failed to acquire account store lock".into()),
         };
         let Some(cid) = store.current.clone() else {
             return SilentRefreshOutcome::NoRefreshToken;
@@ -516,7 +516,7 @@ async fn get_current_token(state: &ProxyState) -> Result<(String, bool), String>
     // 1) 从 store 取一小段快照，尽快释放锁
     let (current_id, remote_mode, primary, fallback, secret) = {
         let store = state.store.lock().map_err(|e| e.to_string())?;
-        let id = store.current.as_ref().ok_or("没有激活的账号")?.clone();
+        let id = store.current.as_ref().ok_or("No account is active")?.clone();
         (
             id,
             store.settings.remote_mode.clone(),
@@ -576,9 +576,9 @@ async fn get_current_token(state: &ProxyState) -> Result<(String, bool), String>
             }
         }
     }
-    let account = store.accounts.get(&current_id).ok_or("当前账号不存在")?;
+    let account = store.accounts.get(&current_id).ok_or("Current account does not exist")?;
     let token = AccountStore::extract_access_token(&account.auth_json)
-        .ok_or_else(|| "当前账号缺少 access_token".to_string())?;
+        .ok_or_else(|| "Current account is missing an access_token".to_string())?;
     let is_chatgpt = token.starts_with("eyJ");
     Ok((token, is_chatgpt))
 }
@@ -716,9 +716,9 @@ async fn resolve_token_with_affinity(
             let acc = store
                 .accounts
                 .get(&account_id)
-                .ok_or_else(|| "session 绑定账号不存在".to_string())?;
+                .ok_or_else(|| "The account bound to this session does not exist".to_string())?;
             AccountStore::extract_access_token(&acc.auth_json)
-                .ok_or_else(|| "session 绑定账号缺 access_token".to_string())?
+                .ok_or_else(|| "The account bound to this session is missing an access_token".to_string())?
         };
         let is_chatgpt = token.starts_with("eyJ");
         println!("[Proxy] Session affinity hit: {} → {}", sk, account_id);
@@ -2329,7 +2329,10 @@ fn current_has_luna_reserve(state: &ProxyState) -> bool {
         .get(current_id)
         .and_then(|account| account.cached_quota.as_ref())
         .and_then(|quota| quota.luna_reserve.as_ref())
-        .is_some_and(|reserve| reserve.is_available_for("gpt-5.6-luna"))
+        .is_some_and(|reserve| {
+            reserve.has_reserve_capacity()
+                && crate::usage::LunaReserveWindow::is_luna_family_model(&reserve.normal_model_slug)
+        })
 }
 
 fn mark_current_luna_reserve_depleted(state: &ProxyState) {
@@ -2582,7 +2585,7 @@ fn do_switch(state: &ProxyState, new_id: &str, reason: SwitchReason) -> Result<(
 
     // macOS 系统通知（可配置）
     if notify_enabled {
-        let from = from_name.unwrap_or_else(|| "无".to_string());
+        let from = from_name.unwrap_or_else(|| "None".to_string());
         let notify_msg = format!("{} → {}", from, to_name);
         std::thread::spawn(move || {
             let _ = std::process::Command::new("osascript")
@@ -2918,7 +2921,7 @@ async fn handle_chat_inbound(
         }
         if !status.is_success() {
             let msg = crate::chat_inbound::extract_upstream_error(&raw)
-                .unwrap_or_else(|| format!("上游 HTTP {}", status.as_u16()));
+                .unwrap_or_else(|| format!("Upstream HTTP {}", status.as_u16()));
             return error_response(
                 StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
                 &msg,
@@ -3273,14 +3276,15 @@ async fn handle_request(
     } else {
         body_bytes
     };
-    let session_affinity_ctx = match (session_key.clone(), used_account_id.clone()) {
-        (Some(sk), Some(aid)) => Some(AffinityCtx {
-            affinity: state.session_affinity.clone(),
-            session_key: sk,
-            account_id: aid,
-        }),
-        _ => None,
-    };
+    let session_affinity_ctx = used_account_id.clone().map(|aid| AffinityCtx {
+        affinity: state.session_affinity.clone(),
+        session_key: session_key.clone().unwrap_or_default(),
+        account_id: aid,
+        codex_desktop: req_headers
+            .get("originator")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.eq_ignore_ascii_case("Codex Desktop")),
+    });
 
     // 2. 根据认证模式路由上游（Relay 类型从 used_account_id 查 base_url）
     let relay_base_url = used_account_id
@@ -3348,7 +3352,7 @@ async fn handle_request(
                 .status(status_code.as_u16())
                 .header("content-type", "application/json")
                 .body(full_body(resp_bytes))
-                .unwrap_or_else(|_| error_response(StatusCode::BAD_GATEWAY, "响应构建失败")));
+                .unwrap_or_else(|_| error_response(StatusCode::BAD_GATEWAY, "Failed to build response")));
         }
         // 记下触发错误的账号名（在 silent_refresh / 切号污染 store.current 之前）
         let triggering_account_name: String = state
@@ -3359,7 +3363,7 @@ async fn handle_request(
                 let id = s.current.clone()?;
                 s.accounts.get(&id).map(|a| a.name.clone())
             })
-            .unwrap_or_else(|| "未知".to_string());
+            .unwrap_or_else(|| "Unknown".to_string());
 
         let resp_bytes = upstream_resp.bytes().await.unwrap_or_default();
         let body_lower = String::from_utf8_lossy(&resp_bytes).to_lowercase();
@@ -3425,7 +3429,7 @@ async fn handle_request(
                     .status(status_code.as_u16())
                     .header("content-type", "application/json")
                     .body(full_body(resp_bytes))
-                    .unwrap_or_else(|_| error_response(StatusCode::BAD_GATEWAY, "响应构建失败")));
+                    .unwrap_or_else(|_| error_response(StatusCode::BAD_GATEWAY, "Failed to build response")));
             }
             // 非 Relay：401 可能是正常过期或被登出。
             // 按设计：client / solo 模式下 Server 是 RT 轮换的唯一权威，本机不独自 refresh
@@ -3552,7 +3556,7 @@ async fn handle_request(
             .status(status_code.as_u16())
             .header("content-type", "application/json")
             .body(full_body(Bytes::from(body_bytes)))
-            .unwrap_or_else(|_| error_response(StatusCode::BAD_GATEWAY, "响应构建失败")));
+            .unwrap_or_else(|_| error_response(StatusCode::BAD_GATEWAY, "Failed to build response")));
     }
 
     // 7. HTTP 429：按 body 内容分流
@@ -3904,7 +3908,7 @@ async fn handle_request(
             .status(status_code.as_u16())
             .header("content-type", "application/json")
             .body(full_body(resp_bytes))
-            .unwrap_or_else(|_| error_response(StatusCode::BAD_GATEWAY, "5xx 透传")));
+            .unwrap_or_else(|_| error_response(StatusCode::BAD_GATEWAY, "Failed to pass through 5xx response")));
     }
 
     // 7.6 其他 4xx（400/404/422 等）：上游通常返 {"detail":"Bad Request"} 一类的 FastAPI
@@ -3929,7 +3933,7 @@ async fn handle_request(
             .status(status_code.as_u16())
             .header("content-type", "application/json")
             .body(full_body(resp_bytes))
-            .unwrap_or_else(|_| error_response(StatusCode::BAD_GATEWAY, "4xx 透传失败")));
+            .unwrap_or_else(|_| error_response(StatusCode::BAD_GATEWAY, "Failed to pass through 4xx response")));
     }
 
     // 8. 成功响应（200 + SSE）→ 立刻返回 Response，body 流内部跑 bootstrap+心跳+切号
@@ -4328,7 +4332,7 @@ async fn try_switch_and_retry(
                 let msg = if let Some(ts) = earliest_reset {
                     let dt = chrono::DateTime::from_timestamp(ts, 0)
                         .map(|d| d.with_timezone(&chrono::Local).format("%H:%M").to_string())
-                        .unwrap_or_else(|| "未知".to_string());
+                        .unwrap_or_else(|| "Unknown".to_string());
                     format!("所有账号额度已耗尽，最早恢复：{}", dt)
                 } else {
                     "所有账号额度已耗尽".to_string()
@@ -4608,10 +4612,10 @@ async fn forward_to_server_parts(
     } else {
         crate::remote_client::resolve_base_url(&primary, &fallback)
             .await
-            .map_err(|e| format!("Server 不可达: {}", e))?
+            .map_err(|e| format!("Server is unreachable: {}", e))?
     };
     let proxy_base = derive_server_proxy_url(&api_base, proxy_port)
-        .ok_or_else(|| format!("无法从 {} 构造 Server proxy URL", api_base))?;
+        .ok_or_else(|| format!("Could not construct the Server proxy URL from {}", api_base))?;
     let upstream_url = format!("{}{}", proxy_base, path_and_query);
     println!("[Proxy] → server forward: {} {}", method, upstream_url);
 
@@ -4640,14 +4644,14 @@ async fn forward_to_server_parts(
         .no_proxy()
         .timeout(std::time::Duration::from_secs(60))
         .build()
-        .map_err(|e| format!("构建 no_proxy client 失败: {}", e))?;
+        .map_err(|e| format!("Failed to build no-proxy client: {}", e))?;
     no_proxy_client
         .request(reqwest_method, &upstream_url)
         .headers(fwd_headers)
         .body(body.to_vec())
         .send()
         .await
-        .map_err(|e| format!("转发到 Server 失败: {e:?}"))
+        .map_err(|e| format!("Failed to forward request to Server: {e:?}"))
 }
 
 /// 写 `~/.codex/auth.json` 但**尊重手机锚约束**：anchor 设置了且 account_id != anchor
@@ -4733,7 +4737,7 @@ async fn forward_to_server_with_silent_retry(
         let first_chunk = match stream.next().await {
             Some(Ok(c)) => c,
             Some(Err(e)) => {
-                return Err(format!("silent_retry: 读首 chunk 失败: {}", e));
+                return Err(format!("silent_retry: failed to read the first chunk: {}", e));
             }
             None => Bytes::new(),
         };
@@ -4787,7 +4791,7 @@ async fn call_remote_switch_silently(state: &ProxyState) -> Result<(), String> {
         )
     };
     if secret.is_empty() {
-        return Err("未配置 remote_shared_secret".to_string());
+        return Err("remote_shared_secret is not configured".to_string());
     }
     let base = crate::remote_client::resolve_base_url(&primary, &fallback)
         .await
@@ -4964,7 +4968,7 @@ async fn forward_with_token(
         .body(body.to_vec())
         .send()
         .await
-        .map_err(|e| format!("转发请求失败: {}", e))
+        .map_err(|e| format!("Request forwarding failed: {}", e))
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -5354,6 +5358,7 @@ struct AffinityCtx {
     affinity: Arc<SessionAffinity>,
     session_key: String,
     account_id: String,
+    codex_desktop: bool,
 }
 
 /// 切号到新账号时调用：把 body 里的 `prompt_cache_key` 后缀拼上当前 account_id。
@@ -5398,6 +5403,7 @@ fn make_affinity_ctx(state: &ProxyState, session_key: Option<&str>) -> Option<Af
         affinity: state.session_affinity.clone(),
         session_key: sk.to_string(),
         account_id: aid,
+        codex_desktop: false,
     })
 }
 
@@ -6089,7 +6095,7 @@ fn build_stream_response_from_parts(
                     // 每个 response.completed 都记 affinity binding，不要求 cache 命中
                     // —— 首轮必然 cold cache，要等到第二轮才看见命中，期间 session 可能
                     // 已经被切走了。详见 session_affinity::record_cache_hit 注释。
-                    if let Some(ctx) = &affinity_clone {
+                    if let Some(ctx) = affinity_clone.as_ref().filter(|ctx| !ctx.session_key.is_empty()) {
                         ctx.affinity.record_cache_hit(
                             &ctx.session_key,
                             &ctx.account_id,
@@ -6102,6 +6108,9 @@ fn build_stream_response_from_parts(
                         .unwrap_or_default();
                     usage.account_id = account_id_for_record;
                     usage.session_key = session_key_for_record;
+                    usage.codex_desktop = affinity_clone
+                        .as_ref()
+                        .is_some_and(|ctx| ctx.codex_desktop);
                     if let Some(tracker) = tracker_clone {
                         tracker.record(usage);
                     }
@@ -6116,7 +6125,7 @@ fn build_stream_response_from_parts(
 
     builder
         .body(BodyExt::boxed_unsync(StreamBody::new(combined)))
-        .unwrap_or_else(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "流构建失败"))
+        .unwrap_or_else(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to build stream"))
 }
 
 /// Full body 包装（用于错误响应等小数据）
@@ -6142,6 +6151,11 @@ async fn handle_websocket(
     state: Arc<ProxyState>,
     mut req: Request<Incoming>,
 ) -> Result<Response<ProxyBody>, Infallible> {
+    let codex_desktop = req
+        .headers()
+        .get("originator")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("Codex Desktop"));
     // 1. 获取 token 和上游地址
     let (mut token, mut is_chatgpt) = match get_current_token(&state).await {
         Ok(t) => t,
@@ -6151,20 +6165,16 @@ async fn handle_websocket(
     // Codex Desktop sends the model routing hint on the upgrade request, before
     // the first response.create frame arrives. Use it so Luna Reserve can skip
     // the ordinary-quota precheck switch instead of being moved to another account.
-    let luna_reserve_requested =
-        routing_hint_model(req.headers())
-            .as_deref()
-            .is_some_and(|model| {
-                model.eq_ignore_ascii_case("gpt-reserve")
-                    || model.eq_ignore_ascii_case("gpt-5.6-luna")
-            });
+    let luna_reserve_requested = routing_hint_model(req.headers())
+        .as_deref()
+        .is_some_and(crate::usage::LunaReserveWindow::is_luna_family_model);
 
     // 预检：如果当前账号没额度，先切号再连接
     {
         let should_switch = {
             let store = match state.store.lock() {
                 Ok(s) => s,
-                Err(_) => return Ok(error_response(StatusCode::INTERNAL_SERVER_ERROR, "锁失败")),
+                Err(_) => return Ok(error_response(StatusCode::INTERNAL_SERVER_ERROR, "Lock failed")),
             };
             if let Some(current_id) = &store.current {
                 store
@@ -6641,7 +6651,7 @@ async fn handle_websocket(
 
     let response = response_builder
         .body(full_body(Bytes::new()))
-        .unwrap_or_else(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "101 构建失败"));
+        .unwrap_or_else(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to build 101 response"));
 
     // 7. 后台任务：upgrade 完成后双向桥接
     let disconnect = state.ws_disconnect.clone();
@@ -6673,7 +6683,7 @@ async fn handle_websocket(
                     println!("[Proxy] 已注入切号通知到 WebSocket");
                 }
 
-                bridge_websockets(client_ws, upstream_ws, disconnect, state).await;
+                bridge_websockets(client_ws, upstream_ws, disconnect, state, codex_desktop).await;
                 println!("[Proxy] WebSocket 连接已关闭");
             }
             Err(e) => eprintln!("[Proxy] WebSocket upgrade 失败: {}", e),
@@ -6702,7 +6712,7 @@ async fn handle_model_routed_websocket(
         .header("Connection", "Upgrade")
         .header("Sec-WebSocket-Accept", accept)
         .body(full_body(Bytes::new()))
-        .unwrap_or_else(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "101 构建失败"));
+        .unwrap_or_else(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to build 101 response"));
     tokio::spawn(async move {
         let Ok(upgraded) = upgrade.await else {
             return;
@@ -7006,6 +7016,7 @@ async fn bridge_websockets<S1, S2>(
     upstream: S2,
     disconnect: Arc<tokio::sync::Notify>,
     state: Arc<ProxyState>,
+    codex_desktop: bool,
 ) where
     S1: futures_util::Stream<Item = Result<tungstenite::Message, tungstenite::Error>>
         + futures_util::Sink<tungstenite::Message, Error = tungstenite::Error>
@@ -7257,7 +7268,8 @@ async fn bridge_websockets<S1, S2>(
                             mark_current_luna_reserve_depleted(&state_clone);
                             mark_current_quota_depleted(&state_clone);
                             if let PickResult::Found { id, .. } = pick_next_account(&state_clone) {
-                                let _ = do_switch(&state_clone, &id, SwitchReason::WebSocketRateLimit);
+                                let _ =
+                                    do_switch(&state_clone, &id, SwitchReason::WebSocketRateLimit);
                             }
                             println!("[Proxy] WebSocket Luna Reserve 已耗尽，切号并关闭此 WS");
                         } else {
@@ -7331,6 +7343,7 @@ async fn bridge_websockets<S1, S2>(
                                 }
                                 usage.account_id = cur_id;
                                 usage.session_key = sk_for_record;
+                                usage.codex_desktop = codex_desktop;
                                 state_clone.tracker.record(usage);
                             }
                         }
@@ -7818,7 +7831,7 @@ async fn handle_chat_completions_relay_websocket(
         .header("Connection", "Upgrade")
         .header("Sec-WebSocket-Accept", accept_key)
         .body(full_body(Bytes::new()))
-        .unwrap_or_else(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "101 构建失败"));
+        .unwrap_or_else(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to build 101 response"));
 
     let disconnect = state.ws_disconnect.clone();
     tokio::spawn(async move {
@@ -7971,7 +7984,7 @@ where
     let model = extract_model_from_body(&body_for_translate);
     let (mut chat_body, mut translator_state) =
         crate::relay_translate::translate_request(&body_for_translate, &model)
-            .map_err(|e| format!("translator 请求处理失败: {}", e))?;
+            .map_err(|e| format!("Translator request processing failed: {}", e))?;
 
     eprintln!(
         "[Proxy] chat relay WS 翻译后 body 前200字符: {}",
@@ -7981,13 +7994,13 @@ where
     let base = relay
         .base_url
         .as_deref()
-        .ok_or_else(|| "Relay base_url 未配置".to_string())?;
+        .ok_or_else(|| "Relay base_url is not configured".to_string())?;
     crate::provider_quirks::preprocess_chat_body(
         crate::provider_quirks::detect_provider(Some(base)),
         &mut chat_body,
     );
     let (upstream_url, upstream_host) =
-        build_chat_completions_url(base).ok_or_else(|| "Relay base_url 解析失败".to_string())?;
+        build_chat_completions_url(base).ok_or_else(|| "Failed to parse Relay base_url".to_string())?;
 
     let mut headers = build_chat_relay_upstream_headers(&upstream_host);
     let api_key = relay.api_key.clone().unwrap_or_default();
@@ -8041,13 +8054,13 @@ where
         .body(chat_body)
         .send()
         .await
-        .map_err(|e| format!("relay 上游连接失败: {}", e))?;
+        .map_err(|e| format!("Failed to connect to relay upstream: {}", e))?;
 
     let status = upstream_resp.status();
     if status != reqwest::StatusCode::OK {
         let bytes = upstream_resp.bytes().await.unwrap_or_default();
         let preview: String = String::from_utf8_lossy(&bytes).chars().take(512).collect();
-        return Err(format!("relay 上游 {}: {}", status.as_u16(), preview));
+        return Err(format!("Relay upstream {}: {}", status.as_u16(), preview));
     }
 
     send_sse_events_as_ws_json(
@@ -8059,7 +8072,7 @@ where
     if !is_sse_response(&upstream_resp) {
         let bytes = upstream_resp.bytes().await.unwrap_or_default();
         let out = crate::relay_translate::translate_sync_response(&translator_state, &bytes)
-            .map_err(|e| format!("sync 响应翻译失败: {}", e))?;
+            .map_err(|e| format!("Failed to translate sync response: {}", e))?;
         let response_obj: serde_json::Value =
             serde_json::from_slice(&out).map_err(|e| format!("sync json parse: {}", e))?;
         let completed = serde_json::json!({
@@ -8097,7 +8110,7 @@ where
                     }
                 }
             }
-            Some(Err(e)) => return Err(format!("relay SSE 上游错误: {}", e)),
+            Some(Err(e)) => return Err(format!("Relay SSE upstream error: {}", e)),
             None => break,
         }
     }
@@ -8417,7 +8430,7 @@ async fn handle_chat_completions_relay(
             .status(status_out.as_u16())
             .header("content-type", "application/json")
             .body(full_body(body_out))
-            .unwrap_or_else(|_| error_response(StatusCode::BAD_GATEWAY, "上游响应构建失败"));
+            .unwrap_or_else(|_| error_response(StatusCode::BAD_GATEWAY, "Failed to build upstream response"));
     }
 
     let is_sse = is_sse_response(&upstream_resp);

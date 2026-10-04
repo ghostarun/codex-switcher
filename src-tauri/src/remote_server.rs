@@ -280,7 +280,7 @@ fn handle_health(state: &ApiState) -> Response<ResponseBody> {
 fn handle_list(state: &ApiState) -> Response<ResponseBody> {
     let store = match state.store.lock() {
         Ok(s) => s,
-        Err(e) => return err_resp(format!("锁获取失败: {}", e)),
+        Err(e) => return err_resp(format!("Failed to acquire lock: {}", e)),
     };
     let accounts: Vec<Account> = store.list_accounts().into_iter().cloned().collect();
     json_resp(StatusCode::OK, json!({ "accounts": accounts }))
@@ -289,7 +289,7 @@ fn handle_list(state: &ApiState) -> Response<ResponseBody> {
 fn handle_list_quota(state: &ApiState) -> Response<ResponseBody> {
     let store = match state.store.lock() {
         Ok(s) => s,
-        Err(e) => return err_resp(format!("锁获取失败: {}", e)),
+        Err(e) => return err_resp(format!("Failed to acquire lock: {}", e)),
     };
     let quotas: Vec<Value> = store
         .accounts
@@ -313,7 +313,7 @@ fn handle_list_quota(state: &ApiState) -> Response<ResponseBody> {
 fn handle_get_account(state: &ApiState, id: &str) -> Response<ResponseBody> {
     let store = match state.store.lock() {
         Ok(s) => s,
-        Err(e) => return err_resp(format!("锁获取失败: {}", e)),
+        Err(e) => return err_resp(format!("Failed to acquire lock: {}", e)),
     };
     match store.list_accounts().into_iter().find(|a| a.id == id) {
         Some(a) => json_resp(StatusCode::OK, json!({ "account": a })),
@@ -324,7 +324,7 @@ fn handle_get_account(state: &ApiState, id: &str) -> Response<ResponseBody> {
 fn handle_get_token(state: &ApiState, id: &str) -> Response<ResponseBody> {
     let store = match state.store.lock() {
         Ok(s) => s,
-        Err(e) => return err_resp(format!("锁获取失败: {}", e)),
+        Err(e) => return err_resp(format!("Failed to acquire lock: {}", e)),
     };
     match store.list_accounts().into_iter().find(|a| a.id == id) {
         Some(a) => json_resp(
@@ -501,17 +501,17 @@ pub(crate) async fn refresh_antigravity_quota_local(
         return Err(lease
             .get("error")
             .and_then(Value::as_str)
-            .unwrap_or("Google ST 获取失败")
+            .unwrap_or("Failed to get Google ST")
             .to_string());
     }
     let token = lease
         .get("access_token")
         .and_then(Value::as_str)
-        .ok_or("Google ST 缺失")?;
+        .ok_or("Google ST is missing")?;
     let project = lease
         .get("project_id")
         .and_then(Value::as_str)
-        .ok_or("Google project_id 缺失")?;
+        .ok_or("Google project_id is missing")?;
     let client = crate::antigravity::native::build_http_client()?;
     let quotas = crate::antigravity::quota::fetch_model_quotas(&client, token, project).await?;
     let tier_due = store
@@ -532,7 +532,7 @@ pub(crate) async fn refresh_antigravity_quota_local(
     };
     {
         let mut guard = store.lock().map_err(|error| error.to_string())?;
-        let account = guard.accounts.get_mut(id).ok_or("账号已被删除")?;
+        let account = guard.accounts.get_mut(id).ok_or("Account has been deleted")?;
         crate::antigravity::quota::write_model_quotas(&mut account.auth_json, &quotas);
         if let Some(tier) = tier {
             crate::antigravity::quota::write_subscription_tier(
@@ -607,7 +607,7 @@ async fn handle_refresh_token(state: &ApiState, id: &str) -> Response<ResponseBo
             ),
             None => json_resp(StatusCode::NOT_FOUND, json!({"error": "account not found"})),
         },
-        Err(e) => err_resp(format!("锁获取失败: {}", e)),
+        Err(e) => err_resp(format!("Failed to acquire lock: {}", e)),
     }
 }
 
@@ -637,7 +637,7 @@ async fn handle_antigravity_oauth_complete(
 ) -> Response<ResponseBody> {
     let body = match req.collect().await {
         Ok(body) => body.to_bytes(),
-        Err(error) => return err_resp(format!("读取 OAuth body 失败: {error}")),
+        Err(error) => return err_resp(format!("Failed to read OAuth request body: {error}")),
     };
     let payload: AntigravityOAuthCompletePayload = match serde_json::from_slice(&body) {
         Ok(payload) => payload,
@@ -714,7 +714,7 @@ fn antigravity_account_mirror(account: Account) -> Account {
 async fn handle_upsert(state: &ApiState, req: Request<Incoming>) -> Response<ResponseBody> {
     let body = match req.collect().await {
         Ok(b) => b.to_bytes(),
-        Err(e) => return err_resp(format!("读取 body 失败: {}", e)),
+        Err(e) => return err_resp(format!("Failed to read request body: {}", e)),
     };
     let payload: UpsertPayload = match serde_json::from_slice(&body) {
         Ok(v) => v,
@@ -737,7 +737,7 @@ async fn handle_upsert(state: &ApiState, req: Request<Incoming>) -> Response<Res
     let (final_id, action): (String, &'static str) = {
         let mut store = match state.store.lock() {
             Ok(s) => s,
-            Err(e) => return err_resp(format!("锁获取失败: {}", e)),
+            Err(e) => return err_resp(format!("Failed to acquire lock: {}", e)),
         };
         let id_hit = store.accounts.contains_key(&incoming_id);
         let identity_hit: Option<String> = if !id_hit && email_key.contains('@') {
@@ -843,7 +843,7 @@ async fn handle_upsert(state: &ApiState, req: Request<Incoming>) -> Response<Res
                 };
                 return match serde_json::to_vec(&body) {
                     Ok(v) => resp_with_body(StatusCode::OK, v),
-                    Err(e) => err_resp(format!("序列化响应失败: {}", e)),
+                    Err(e) => err_resp(format!("Failed to serialize response: {}", e)),
                 };
             }
         };
@@ -1038,7 +1038,7 @@ async fn handle_upsert(state: &ApiState, req: Request<Incoming>) -> Response<Res
     };
     match serde_json::to_vec(&body) {
         Ok(v) => resp_with_body(StatusCode::OK, v),
-        Err(e) => err_resp(format!("序列化响应失败: {}", e)),
+        Err(e) => err_resp(format!("Failed to serialize response: {}", e)),
     }
 }
 
@@ -1052,7 +1052,7 @@ fn handle_delete(state: &ApiState, id: &str) -> Response<ResponseBody> {
     {
         let mut store = match state.store.lock() {
             Ok(s) => s,
-            Err(e) => return err_resp(format!("锁获取失败: {}", e)),
+            Err(e) => return err_resp(format!("Failed to acquire lock: {}", e)),
         };
         if let Err(e) = store.delete_account(id) {
             return json_resp(StatusCode::BAD_REQUEST, json!({"error": e}));
@@ -1075,7 +1075,7 @@ async fn handle_refresh_account(state: &ApiState, id: &str) -> Response<Response
     let (access_token_opt, account_id, refresh_token, is_openai_account) = {
         let store = match state.store.lock() {
             Ok(s) => s,
-            Err(e) => return err_resp(format!("锁获取失败: {}", e)),
+            Err(e) => return err_resp(format!("Failed to acquire lock: {}", e)),
         };
         match store.accounts.get(&id) {
             Some(a) => (
@@ -1238,7 +1238,7 @@ fn err_resp(msg: String) -> Response<ResponseBody> {
 fn handle_get_current(state: &ApiState) -> Response<ResponseBody> {
     let store = match state.store.lock() {
         Ok(s) => s,
-        Err(e) => return err_resp(format!("锁获取失败: {}", e)),
+        Err(e) => return err_resp(format!("Failed to acquire lock: {}", e)),
     };
     let current = store.current.clone();
     let (name, quota) = match current.as_ref().and_then(|id| store.accounts.get(id)) {
@@ -1265,7 +1265,7 @@ struct SwitchPayload {
 async fn handle_switch(state: &ApiState, req: Request<Incoming>) -> Response<ResponseBody> {
     let body = match req.collect().await {
         Ok(b) => b.to_bytes(),
-        Err(e) => return err_resp(format!("读取 body 失败: {}", e)),
+        Err(e) => return err_resp(format!("Failed to read request body: {}", e)),
     };
     let payload: SwitchPayload = if body.is_empty() {
         SwitchPayload {
@@ -1286,7 +1286,7 @@ async fn handle_switch(state: &ApiState, req: Request<Incoming>) -> Response<Res
 
     let mut store = match state.store.lock() {
         Ok(s) => s,
-        Err(e) => return err_resp(format!("锁获取失败: {}", e)),
+        Err(e) => return err_resp(format!("Failed to acquire lock: {}", e)),
     };
 
     let current_now = store.current.clone();
@@ -1413,7 +1413,7 @@ struct SoloHeartbeatPayload {
 async fn handle_solo_heartbeat(req: Request<Incoming>) -> Response<ResponseBody> {
     let body = match req.collect().await {
         Ok(b) => b.to_bytes(),
-        Err(e) => return err_resp(format!("读取 body 失败: {}", e)),
+        Err(e) => return err_resp(format!("Failed to read request body: {}", e)),
     };
     let payload: SoloHeartbeatPayload = if body.is_empty() {
         SoloHeartbeatPayload { ttl_secs: None }
@@ -1447,7 +1447,7 @@ async fn handle_solo_current(
 ) -> Response<ResponseBody> {
     let body = match req.collect().await {
         Ok(b) => b.to_bytes(),
-        Err(e) => return err_resp(format!("读取 body 失败: {}", e)),
+        Err(e) => return err_resp(format!("Failed to read request body: {}", e)),
     };
     let payload: SoloCurrentPayload = match serde_json::from_slice(&body) {
         Ok(v) => v,
@@ -1463,7 +1463,7 @@ async fn handle_solo_current(
     let (from_name, to_name) = {
         let mut store = match state.store.lock() {
             Ok(s) => s,
-            Err(e) => return err_resp(format!("锁获取失败: {}", e)),
+            Err(e) => return err_resp(format!("Failed to acquire lock: {}", e)),
         };
         if !store.accounts.contains_key(&new_id) {
             return json_resp(StatusCode::NOT_FOUND, json!({"error": "account not found"}));
@@ -1531,7 +1531,7 @@ async fn handle_upload_skill(req: Request<Incoming>, query: &str) -> Response<Re
     }
     let body = match req.collect().await {
         Ok(b) => b.to_bytes(),
-        Err(e) => return err_resp(format!("读取 body 失败: {}", e)),
+        Err(e) => return err_resp(format!("Failed to read request body: {}", e)),
     };
     match crate::skills::extract_skill_zip(&name, &body) {
         Ok(_) => json_resp(

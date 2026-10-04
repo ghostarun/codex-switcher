@@ -78,6 +78,8 @@ pub struct TokenHistoryEntry {
     /// 0.5.16+ 才记录，旧记录留空。
     #[serde(default)]
     pub session_key: String,
+    #[serde(default)]
+    pub codex_desktop: bool,
 }
 
 /// 单次请求的 usage 数据
@@ -90,6 +92,7 @@ pub struct RequestUsage {
     pub model: String,
     pub account_id: String,
     pub session_key: String,
+    pub codex_desktop: bool,
 }
 
 /// 累计统计数据
@@ -212,6 +215,7 @@ impl TokenTracker {
             cost_saved_usd: cost_saved,
             account_id: usage.account_id,
             session_key: usage.session_key,
+            codex_desktop: usage.codex_desktop,
         };
         Self::append_history(&entry);
     }
@@ -348,6 +352,7 @@ pub fn extract_usage_from_sse(data: &[u8], request_model: &str) -> Option<Reques
                     model,
                     account_id: String::new(),
                     session_key: String::new(),
+                    codex_desktop: false,
                 });
             }
         }

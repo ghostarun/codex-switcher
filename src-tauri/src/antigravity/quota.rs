@@ -270,7 +270,7 @@ fn parse_model_quotas(body: &Value, now: String) -> Result<HashMap<String, Model
         }
     }
     if quotas.is_empty() {
-        return Err("Google 未返回模型额度，请稍后重试；这不表示额度为 0".to_string());
+        return Err("Google did not return model quotas. Try again later; this does not mean the quota is zero.".to_string());
     }
     Ok(quotas)
 }

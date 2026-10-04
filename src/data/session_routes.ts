@@ -37,8 +37,7 @@ export function shortSessionId(sid: string): string {
     return sid.length > 12 ? sid.slice(0, 12) : sid;
 }
 
-/** Relative time formatter — "3 小时前" / "昨天 14:22" / "2025-11-08 14:22".
- *  Used for both last_hit_at and started_at. */
+/** Relative time formatter — "3h ago" / "Yesterday 14:22" / "2025-11-08 14:22". */
 export function formatRelativeTime(iso: string | null | undefined): string {
     if (!iso) return '—';
     const d = new Date(iso);
@@ -50,13 +49,13 @@ export function formatRelativeTime(iso: string | null | undefined): string {
     const day = Math.floor(diff / 86_400_000);
 
     if (diff < 0) return d.toLocaleString();
-    if (min < 1) return '刚刚';
-    if (min < 60) return `${min} 分钟前`;
-    if (hr < 24) return `${hr} 小时前`;
+    if (min < 1) return 'Just now';
+    if (min < 60) return `${min} min ago`;
+    if (hr < 24) return `${hr} hr ago`;
     if (day === 1) {
-        return `昨天 ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+        return `Yesterday ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
     }
-    if (day < 7) return `${day} 天前`;
+    if (day < 7) return `${day}d ago`;
     // Older than a week — fall back to absolute date.
     const yyyy = d.getFullYear();
     const mm = (d.getMonth() + 1).toString().padStart(2, '0');

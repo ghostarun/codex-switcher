@@ -861,7 +861,9 @@
     font-weight: 600;
 }
 
-.account-expiry-modal-body input[type='date'] {
+.account-expiry-modal-body input[type='date'],
+.account-expiry-modal-body input[type='number'],
+.account-expiry-modal-body select {
     width: 100%;
     box-sizing: border-box;
     padding: 10px 12px;
@@ -873,9 +875,26 @@
     outline: none;
 }
 
-.account-expiry-modal-body input[type='date']:focus {
+.account-expiry-modal-body input[type='date']:focus,
+.account-expiry-modal-body input[type='number']:focus,
+.account-expiry-modal-body select:focus {
     border-color: rgba(56, 189, 248, 0.7);
     box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.12);
+}
+
+.widget-id-badge {
+    padding: 2px 5px;
+    border: 1px solid rgba(56, 189, 248, .25);
+    background: rgba(56, 189, 248, .08);
+    color: #7dd3fc;
+    font: inherit;
+    line-height: 1.2;
+    cursor: pointer;
+}
+
+.widget-id-badge:hover {
+    border-color: rgba(56, 189, 248, .65);
+    background: rgba(56, 189, 248, .16);
 }
 
 .account-expiry-help,

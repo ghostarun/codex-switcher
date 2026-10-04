@@ -40,6 +40,10 @@ pub struct AppSettings {
     #[serde(default = "default_theme_palette")]
     pub theme_palette: String,
 
+    /// Account label used by the floating quota widget: "number" or "emoji".
+    #[serde(default = "default_quota_widget_identity")]
+    pub quota_widget_identity: String,
+
     /// 是否允许智能切号自动切换到免费账号
     #[serde(default = "default_false")]
     pub allow_auto_switch_to_free: bool,
@@ -175,7 +179,11 @@ fn default_bootstrap_time_cap_ms() -> u64 {
 }
 
 fn default_theme_palette() -> String {
-    "midnight".to_string()
+    "obsidian".to_string()
+}
+
+fn default_quota_widget_identity() -> String {
+    "number".to_string()
 }
 
 fn default_primary_ide() -> String {
@@ -266,6 +274,7 @@ impl Default for AppSettings {
             refresh_interval_minutes: default_refresh_interval(),
             inactive_refresh_days: default_inactive_refresh_days(),
             theme_palette: default_theme_palette(),
+            quota_widget_identity: default_quota_widget_identity(),
             allow_auto_switch_to_free: false,
             proxy_enabled: false,
             proxy_port: default_proxy_port(),
@@ -436,6 +445,13 @@ pub struct Account {
     /// 绑死单机，跨机同步该字段无意义）。
     #[serde(default, skip_serializing_if = "is_false")]
     pub is_session_anchor: bool,
+
+    /// Optional short identifier shown in the floating quota widget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub widget_number: Option<u16>,
+    /// Optional symbol shown when widget identity mode is "emoji".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub widget_emoji: Option<String>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -654,11 +670,11 @@ pub struct CachedQuota {
 }
 
 fn default_five_hour_label() -> String {
-    "5H 限额".to_string()
+    "5H limit".to_string()
 }
 
 fn default_weekly_label() -> String {
-    "周限额".to_string()
+    "Weekly limit".to_string()
 }
 
 /// 账号存储结构
@@ -679,7 +695,7 @@ pub struct AccountStore {
 fn ensure_private_file_permissions(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
     let perms = fs::Permissions::from_mode(0o600);
-    fs::set_permissions(path, perms).map_err(|e| format!("设置文件权限失败: {}", e))
+    fs::set_permissions(path, perms).map_err(|e| format!("Failed to set file permissions: {}", e))
 }
 
 #[cfg(not(unix))]
@@ -691,7 +707,7 @@ fn ensure_private_file_permissions(_path: &Path) -> Result<(), String> {
 fn ensure_private_dir_permissions(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
     let perms = fs::Permissions::from_mode(0o700);
-    fs::set_permissions(path, perms).map_err(|e| format!("设置目录权限失败: {}", e))
+    fs::set_permissions(path, perms).map_err(|e| format!("Failed to set directory permissions: {}", e))
 }
 
 #[cfg(not(unix))]
@@ -700,7 +716,7 @@ fn ensure_private_dir_permissions(_path: &Path) -> Result<(), String> {
 }
 
 fn write_text_secure(path: &Path, content: &str) -> Result<(), String> {
-    fs::write(path, content).map_err(|e| format!("写入文件失败: {}", e))?;
+    fs::write(path, content).map_err(|e| format!("Failed to write file: {}", e))?;
     ensure_private_file_permissions(path)?;
     Ok(())
 }
@@ -711,7 +727,7 @@ fn codex_switcher_home_dir() -> PathBuf {
         return PathBuf::from(path);
     }
 
-    dirs::home_dir().expect("无法获取用户目录")
+    dirs::home_dir().expect("Could not determine the user directory")
 }
 
 impl AccountStore {
@@ -797,12 +813,12 @@ impl AccountStore {
 
     /// Manual Google selection never writes Codex auth or changes its current pointer.
     pub fn switch_antigravity_to(&mut self, id: &str) -> Result<(), String> {
-        let account = self.accounts.get(id).ok_or("Google 账号不存在")?;
+        let account = self.accounts.get(id).ok_or("Google account not found")?;
         if !account.is_antigravity_oauth() {
-            return Err("只能选择 Google Antigravity 账号".to_string());
+            return Err("Only Google Antigravity accounts can be selected here.".to_string());
         }
         if account.is_banned || account.is_logged_out || account.is_token_invalid {
-            return Err("Google 账号不可用，请先重新授权".to_string());
+            return Err("Google account is unavailable. Authorize it again first.".to_string());
         }
         self.settings.current_antigravity_account_id = Some(id.to_string());
         Ok(())
@@ -1176,12 +1192,12 @@ impl AccountStore {
 
         // 确保目录存在
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
             ensure_private_dir_permissions(parent)?;
         }
 
         let content =
-            serde_json::to_string_pretty(self).map_err(|e| format!("序列化失败: {}", e))?;
+            serde_json::to_string_pretty(self).map_err(|e| format!("Serialization failed: {}", e))?;
 
         write_text_secure(&path, &content)?;
 
@@ -1192,13 +1208,13 @@ impl AccountStore {
     pub fn read_codex_auth() -> Result<serde_json::Value, String> {
         let path = Self::codex_auth_path();
         if !path.exists() {
-            return Err("未找到 Codex auth.json，请先登录 Codex".to_string());
+            return Err("Codex auth.json was not found. Sign in to Codex first.".to_string());
         }
 
         let content =
-            fs::read_to_string(&path).map_err(|e| format!("读取 auth.json 失败: {}", e))?;
+            fs::read_to_string(&path).map_err(|e| format!("Failed to read auth.json: {}", e))?;
 
-        serde_json::from_str(&content).map_err(|e| format!("解析 auth.json 失败: {}", e))
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse auth.json: {}", e))
     }
 
     /// 写入 Codex auth.json，`expires_at` 跟随 access_token JWT 的真实 `exp` claim
@@ -1253,24 +1269,24 @@ impl AccountStore {
 
     pub fn write_codex_auth(auth: &serde_json::Value) -> Result<(), String> {
         let path = Self::codex_auth_path();
-        println!("写入 auth.json 到路径: {:?}", path);
+        println!("Writing auth.json to: {:?}", path);
 
         // 确保目录存在
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
             ensure_private_dir_permissions(parent)?;
         }
 
         let auth = Self::normalize_codex_auth_for_disk(auth);
         let content =
-            serde_json::to_string_pretty(&auth).map_err(|e| format!("序列化失败: {}", e))?;
+            serde_json::to_string_pretty(&auth).map_err(|e| format!("Serialization failed: {}", e))?;
 
         // 原子写入：先写临时文件，再重命名
         let tmp_path = path.with_extension("tmp");
-        write_text_secure(&tmp_path, &content).map_err(|e| format!("写入临时文件失败: {}", e))?;
+        write_text_secure(&tmp_path, &content).map_err(|e| format!("Failed to write temporary file: {}", e))?;
 
         fs::rename(&tmp_path, &path)
-            .map_err(|e| format!("重命名文件失败 (Atomic Write): {}", e))?;
+            .map_err(|e| format!("Failed to rename file (atomic write): {}", e))?;
         ensure_private_file_permissions(&path)?;
 
         Ok(())
@@ -1311,6 +1327,8 @@ impl AccountStore {
             relay_protocol: None,
             relay_category: None,
             is_session_anchor: false,
+            widget_number: None,
+            widget_emoji: None,
         };
 
         self.accounts.insert(id.clone(), account.clone());
@@ -1378,6 +1396,8 @@ impl AccountStore {
             relay_protocol,
             relay_category,
             is_session_anchor: false,
+            widget_number: None,
+            widget_emoji: None,
         };
 
         self.accounts.insert(id.clone(), account.clone());
@@ -1427,6 +1447,8 @@ impl AccountStore {
             relay_protocol: None,
             relay_category: None,
             is_session_anchor: false,
+            widget_number: None,
+            widget_emoji: None,
         };
 
         self.accounts.insert(id, account.clone());
@@ -1453,29 +1475,48 @@ impl AccountStore {
     /// `chatgpt_account_id` 永远是 anchor 那个号，手机 ↔ Mac 的 WS bridge
     /// 不掉线；proxy 出口侧仍然按 `store.current` 路由到目标号。
     pub fn switch_to(&mut self, id: &str, _hot_legacy: bool) -> Result<(), String> {
+        self.switch_to_inner(id, false)
+    }
+
+    /// Desktop launch must own `~/.codex/auth.json` for the selected account.
+    /// Phone-anchor normally skips non-anchor writes; pass `force_write_disk` to
+    /// override that (caller should release the phone anchor first if needed).
+    pub fn switch_to_forcing_disk(&mut self, id: &str) -> Result<(), String> {
+        self.switch_to_inner(id, true)
+    }
+
+    fn switch_to_inner(&mut self, id: &str, force_write_disk: bool) -> Result<(), String> {
         let anchor_id = self.session_anchor_id();
         let target_is_anchor = anchor_id.as_deref() == Some(id);
 
         let account = self
             .accounts
             .get_mut(id)
-            .ok_or_else(|| format!("账号不存在: {}", id))?;
+            .ok_or_else(|| format!("Account not found: {}", id))?;
 
         account.last_used = Some(Utc::now());
 
         println!("正在切换账号: {}", id);
-        if anchor_id.is_some() && !target_is_anchor {
+        if force_write_disk || anchor_id.is_none() || target_is_anchor {
+            // 无 anchor、切回 anchor、或 Desktop 强制落盘：写 auth.json。
+            // Relay 走 ApiKey schema，订阅号走原 OAuth schema —— 见 to_codex_auth_value 注释。
+            Self::write_codex_auth(&account.to_codex_auth_value())?;
+            if force_write_disk && anchor_id.is_some() && !target_is_anchor {
+                println!(
+                    "[Switch] Desktop force-write: wrote non-anchor {} to disk (anchor was {})",
+                    id,
+                    anchor_id.as_deref().unwrap_or("?"),
+                );
+            } else {
+                println!("账号切换成功: auth.json 已更新");
+            }
+        } else {
             // anchor 模式 + 切到非 anchor：跳过写 auth.json，让 Codex.app 仍以 anchor 身份在线。
             println!(
                 "[Switch] 手机锚生效（anchor={}），目标 {} 非 anchor → 跳过写 auth.json",
                 anchor_id.as_deref().unwrap_or("?"),
                 id,
             );
-        } else {
-            // 无 anchor 或切回 anchor 自身：照旧落盘。
-            // Relay 走 ApiKey schema，订阅号走原 OAuth schema —— 见 to_codex_auth_value 注释。
-            Self::write_codex_auth(&account.to_codex_auth_value())?;
-            println!("账号切换成功: auth.json 已更新");
         }
 
         self.current = Some(id.to_string());
@@ -1485,7 +1526,7 @@ impl AccountStore {
     /// 删除账号
     pub fn delete_account(&mut self, id: &str) -> Result<(), String> {
         if !self.accounts.contains_key(id) {
-            return Err(format!("账号不存在: {}", id));
+            return Err(format!("Account not found: {}", id));
         }
 
         self.accounts.remove(id);
@@ -1528,10 +1569,10 @@ impl AccountStore {
         let account = self
             .accounts
             .get(id)
-            .ok_or_else(|| format!("账号不存在: {}", id))?;
+            .ok_or_else(|| format!("Account not found: {}", id))?;
         if enabled && !account.is_chatgpt_oauth() {
             return Err(
-                "手机锚只能设在 ChatGPT 订阅号上（Relay / OpenAI API key 不带 chatgpt_account_id，Codex.app 手机 bridge 无法鉴权）"
+                "Phone anchor can only be set on a ChatGPT subscription account. Relay and OpenAI API-key accounts lack chatgpt_account_id, which Codex Desktop needs to authenticate the phone bridge."
                     .to_string(),
             );
         }
@@ -1609,7 +1650,7 @@ impl AccountStore {
                     Some(None)
                 } else {
                     chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
-                        .map_err(|_| "账号到期日格式必须是 YYYY-MM-DD".to_string())?;
+                        .map_err(|_| "Account expiry date must use YYYY-MM-DD format.".to_string())?;
                     Some(Some(value.to_string()))
                 }
             }
@@ -1619,7 +1660,7 @@ impl AccountStore {
         let account = self
             .accounts
             .get_mut(id)
-            .ok_or_else(|| format!("账号不存在: {}", id))?;
+            .ok_or_else(|| format!("Account not found: {}", id))?;
 
         if let Some(n) = name {
             account.name = n;
@@ -1643,9 +1684,9 @@ impl AccountStore {
         let account = self
             .accounts
             .get_mut(id)
-            .ok_or_else(|| format!("账号不存在: {}", id))?;
+            .ok_or_else(|| format!("Account not found: {}", id))?;
         if !account.is_relay() {
-            return Err("不是中转站账号".to_string());
+            return Err("This is not a relay account.".to_string());
         }
         account.relay_usage_cookie = usage_cookie;
         account.relay_usage_cache = None;
@@ -1657,7 +1698,7 @@ impl AccountStore {
         let account = self
             .accounts
             .get_mut(id)
-            .ok_or_else(|| format!("账号不存在: {}", id))?;
+            .ok_or_else(|| format!("Account not found: {}", id))?;
         account.keepalive.inactive_refresh_enabled = enabled;
         Ok(())
     }
@@ -1671,12 +1712,12 @@ impl AccountStore {
 
     /// 导出配置
     pub fn export(&self) -> Result<String, String> {
-        serde_json::to_string_pretty(self).map_err(|e| format!("导出失败: {}", e))
+        serde_json::to_string_pretty(self).map_err(|e| format!("Export failed: {}", e))
     }
 
     /// 导入配置
     pub fn import(json: &str) -> Result<Self, String> {
-        let mut store: Self = serde_json::from_str(json).map_err(|e| format!("导入失败: {}", e))?;
+        let mut store: Self = serde_json::from_str(json).map_err(|e| format!("Import failed: {}", e))?;
         store.backfill_refresh_tokens();
         Ok(store)
     }
@@ -1871,7 +1912,7 @@ impl AccountStore {
     pub fn extract_jwt_claims_from_token(token: &str) -> Result<Value, String> {
         let parts: Vec<&str> = token.split('.').collect();
         if parts.len() != 3 {
-            return Err("无效的 Token 格式".to_string());
+            return Err("Invalid token format.".to_string());
         }
 
         use base64::Engine;
@@ -1884,9 +1925,9 @@ impl AccountStore {
         let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(payload_part)
             .or_else(|_| base64::engine::general_purpose::STANDARD.decode(&padded))
-            .map_err(|e| format!("Base64 解码失败: {}", e))?;
-        let json_str = String::from_utf8(decoded).map_err(|e| format!("UTF-8 转换失败: {}", e))?;
-        serde_json::from_str(&json_str).map_err(|e| format!("JSON 解析失败: {}", e))
+            .map_err(|e| format!("Base64 decoding failed: {}", e))?;
+        let json_str = String::from_utf8(decoded).map_err(|e| format!("UTF-8 conversion failed: {}", e))?;
+        serde_json::from_str(&json_str).map_err(|e| format!("JSON parsing failed: {}", e))
     }
 
     /// 从 auth_json 中提取邮箱（优先 id_token claims）
@@ -2556,10 +2597,10 @@ mod tests {
 
         let err = store
             .set_session_anchor(&relay_id, true)
-            .expect_err("Relay 号不应该能当 anchor");
+            .expect_err("A relay account must not be accepted as a phone anchor.");
         assert!(
-            err.contains("ChatGPT 订阅号"),
-            "错误消息要解释为什么被拒绝，实际: {}",
+            err.contains("ChatGPT subscription account"),
+            "The error should explain why the account was rejected: {}",
             err
         );
 
@@ -2573,8 +2614,8 @@ mod tests {
         let mut store = AccountStore::default();
         let err = store
             .set_session_anchor("not-a-real-id", true)
-            .expect_err("不存在的 id 应该返回错");
-        assert!(err.contains("不存在"));
+            .expect_err("A non-existent account ID should return an error.");
+        assert!(err.contains("not found"));
     }
 
     #[test]

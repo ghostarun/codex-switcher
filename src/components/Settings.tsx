@@ -12,6 +12,7 @@ interface AppSettings {
     refresh_interval_minutes: number;
     inactive_refresh_days: number;
     theme_palette: string;
+    quota_widget_identity: 'number' | 'emoji';
     allow_auto_switch_to_free: boolean;
     proxy_enabled: boolean;
     proxy_port: number;
@@ -59,7 +60,8 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
         background_refresh: false,
         refresh_interval_minutes: 30,
         inactive_refresh_days: 7,
-        theme_palette: 'midnight',
+        theme_palette: 'obsidian',
+        quota_widget_identity: 'number',
         allow_auto_switch_to_free: false,
         proxy_enabled: false,
         proxy_port: 18080,
@@ -88,8 +90,8 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
     const [anchorSearch, setAnchorSearch] = useState('');
     const [anchorBusy, setAnchorBusy] = useState(false);
 
-    // 手机锚只对 ChatGPT 订阅号有效：Codex.app `/codex/remote/control/*`
-    // 必须用 chatgpt_account_id 鉴权；Relay / OpenAI API key 没有这个 claim。
+    // Phone anchor applies to ChatGPT subscription accounts only：Codex.app `/codex/remote/control/*`
+    // Must authenticate with chatgpt_account_id；Relay / OpenAI API key lacks this claim.
     const anchorAccount = useMemo(
         () => accounts.find(a => a.is_session_anchor) || null,
         [accounts]
@@ -116,7 +118,7 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
             const data = await invoke<AppSettings>('get_settings');
             setSettings(data);
         } catch (e) {
-            console.error('加载设置失败:', e);
+            console.error('Failed to load settings:', e);
         }
     };
 
@@ -125,10 +127,10 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
         setMessage(null);
         try {
             await invoke('update_settings', { settings });
-            setMessage({ type: 'success', text: '✅ 设置已保存' });
+            setMessage({ type: 'success', text: '✅ Settings saved' });
             setTimeout(() => setMessage(null), 3000);
         } catch (e) {
-            setMessage({ type: 'error', text: `❌ 保存失败: ${e}` });
+            setMessage({ type: 'error', text: `❌ Save failed: ${e}` });
         } finally {
             setSaving(false);
         }
@@ -144,11 +146,11 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
         setMessage(null);
         try {
             const text = await fn();
-            setRemoteStatus(`✅ ${label}：${text}`);
-            setMessage({ type: 'success', text: `${label} 成功` });
+            setRemoteStatus(`✅ ${label}: ${text}`);
+            setMessage({ type: 'success', text: `${label} succeeded` });
         } catch (e) {
-            setRemoteStatus(`❌ ${label} 失败：${e}`);
-            setMessage({ type: 'error', text: `${label} 失败：${e}` });
+            setRemoteStatus(`❌ ${label} failed: ${e}`);
+            setMessage({ type: 'error', text: `${label} failed: ${e}` });
         } finally {
             setRemoteBusy(false);
         }
@@ -158,38 +160,38 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
         try {
             const s = await invoke<string>('remote_generate_secret');
             updateField('remote_shared_secret', s);
-            setMessage({ type: 'success', text: '已生成新密钥，记得保存设置' });
+            setMessage({ type: 'success', text: 'New key generated — remember to save settings' });
         } catch (e) {
-            setMessage({ type: 'error', text: `生成失败：${e}` });
+            setMessage({ type: 'error', text: `Generate failed:${e}` });
         }
     };
 
     const handleSoloSyncNow = () =>
-        withRemote('立即同号', async () => {
+        withRemote('Switch to same account now', async () => {
             const switched = await invoke<string | null>('solo_sync_current');
-            return switched ? `已切换到 ${switched}` : '已与 Server 一致，无需切换';
+            return switched ? `Switched to ${switched}` : 'Already in sync with Server; no switch needed';
         });
 
     const handleRemoteTest = () =>
-        withRemote('测试连接', async () => {
+        withRemote('Test connection', async () => {
             const [url, h] = await invoke<[string, RemoteHealth]>('remote_probe');
-            return `使用 ${url}，Server v${h.version}，远端账号数 ${h.account_count}`;
+            return `Using ${url}, Server v${h.version}, ${h.account_count} remote account(s)`;
         });
 
     const handleRemotePushAll = () =>
-        withRemote('推送全部账号到 Server', async () => {
+        withRemote('Push all accounts to Server', async () => {
             const n = await invoke<number>('remote_push_all');
-            return `已上传 ${n} 个账号`;
+            return `Uploaded ${n} account(s)`;
         });
 
     const handleRemotePullAll = () =>
-        withRemote('从 Server 拉取全部账号', async () => {
+        withRemote('Pull all accounts from Server', async () => {
             const n = await invoke<number>('remote_pull_all');
-            return `已合并 ${n} 个账号`;
+            return `Merged ${n} account(s)`;
         });
 
     const handleRemotePullAllTokens = () =>
-        withRemote('从 Server 同步所有 token', async () => {
+        withRemote('Sync all tokens from Server', async () => {
             const r = await invoke<{
                 pulled: number;
                 refreshed: number;
@@ -199,17 +201,17 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                 errors: [string, string][];
             }>('remote_pull_all_tokens');
             const parts = [
-                `账号 ${r.pulled}`,
+                `Account ${r.pulled}`,
                 `token ${r.refreshed}`,
             ];
             if (r.current_name) parts.push(`current=${r.current_name}`);
-            if (r.wrote_auth_json) parts.push('已写 auth.json');
-            if (r.errors.length > 0) parts.push(`错误 ${r.errors.length}`);
+            if (r.wrote_auth_json) parts.push('wrote auth.json');
+            if (r.errors.length > 0) parts.push(`${r.errors.length} error(s)`);
             return parts.join(' · ');
         });
 
     const handleRemoteRestart = () =>
-        withRemote('重启 HTTP 服务', async () => {
+        withRemote('Restart HTTP service', async () => {
             const s = await invoke<string>('remote_restart_server');
             return s;
         });
@@ -220,12 +222,12 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
         setMessage(null);
         try {
             await onSetSessionAnchor(id, true);
-            setMessage({ type: 'success', text: '✅ 已设为手机锚' });
+            setMessage({ type: 'success', text: '✅ Phone anchor set' });
             setTimeout(() => setMessage(null), 3000);
             setShowAnchorPicker(false);
             setAnchorSearch('');
         } catch (e) {
-            setMessage({ type: 'error', text: `❌ 绑定失败：${e}` });
+            setMessage({ type: 'error', text: `❌ Bind failed:${e}` });
         } finally {
             setAnchorBusy(false);
         }
@@ -237,17 +239,17 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
         setMessage(null);
         try {
             await onSetSessionAnchor(anchorAccount.id, false);
-            setMessage({ type: 'success', text: '✅ 已解除手机锚绑定' });
+            setMessage({ type: 'success', text: '✅ Phone anchor cleared' });
             setTimeout(() => setMessage(null), 3000);
         } catch (e) {
-            setMessage({ type: 'error', text: `❌ 解除失败：${e}` });
+            setMessage({ type: 'error', text: `❌ Unbind failed:${e}` });
         } finally {
             setAnchorBusy(false);
         }
     };
 
     const handleRepair = async () => {
-        if (!confirm('这将尝试移除 Codex App 的安全隔离属性。\n\n系统可能会弹窗要求输入密码以获得权限。是否继续？')) {
+        if (!confirm('This will attempt to remove Codex App quarantine attributes.\n\nThe system may prompt for your password. Continue?')) {
             return;
         }
 
@@ -256,9 +258,9 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
         try {
             const ticket = await invoke<string>('request_quarantine_fix_ticket');
             await invoke('fix_codex_quarantine', { ticket });
-            alert('✅ 修复成功！\n\n现在请尝试重新打开 Codex App。');
+            alert('✅ Fix successful!\n\nTry reopening Codex App now.');
         } catch (e) {
-            alert(`❌ 修复失败: ${e}`);
+            alert(`❌ Fix failed: ${e}`);
         } finally {
             setRepairing(false);
         }
@@ -268,14 +270,14 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
     return (
         <div className="settings-page">
             <div className="settings-header">
-                <h2>设置</h2>
+                <h2>Settings</h2>
                 <button
                     className="save-button"
                     onClick={saveSettings}
                     disabled={saving}
                 >
                     <Save size={14} />
-                    {saving ? '保存中...' : '保存设置'}
+                    {saving ? 'Saving...' : 'Save Settings'}
                 </button>
             </div>
 
@@ -286,34 +288,49 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
             )}
 
             <div className="settings-section">
-                <h3><Palette size={16} /> 界面外观</h3>
+                <h3><Palette size={16} /> Appearance</h3>
                 <div className="setting-item">
                     <div className="setting-info">
-                        <span className="setting-label">界面配色</span>
-                        <span className="setting-desc">主界面颜色的色调风格</span>
+                        <span className="setting-label">Theme</span>
+                        <span className="setting-desc">Main interface color style</span>
                     </div>
                     <select
                         className="select-input"
                         value={settings.theme_palette}
                         onChange={e => updateField('theme_palette', e.target.value)}
                     >
-                        <option value="midnight">暗黑护眼</option>
-                        <option value="github">经典蓝</option>
-                        <option value="agate">玛瑙绿</option>
+                        <option value="obsidian">Obsidian Black</option>
+                        <option value="midnight">Midnight Dark</option>
+                        <option value="github">Classic Blue</option>
+                        <option value="agate">Agate Green</option>
+                    </select>
+                </div>
+                <div className="setting-item">
+                    <div className="setting-info">
+                        <span className="setting-label">Quota widget account label</span>
+                        <span className="setting-desc">Show the active account’s assigned number or emoji</span>
+                    </div>
+                    <select
+                        className="select-input"
+                        value={settings.quota_widget_identity}
+                        onChange={e => updateField('quota_widget_identity', e.target.value as 'number' | 'emoji')}
+                    >
+                        <option value="number">Number</option>
+                        <option value="emoji">Emoji</option>
                     </select>
                 </div>
             </div>
 
             <div className="settings-section">
-                <h3><Server size={16} /> 后台服务</h3>
+                <h3><Server size={16} /> Background service</h3>
 
                 <div className="setting-item">
                     <div className="setting-info">
-                        <span className="setting-label">后台保活与同步</span>
+                        <span className="setting-label">Background keepalive & sync</span>
                         <span className="setting-desc">
                             {settings.remote_mode === 'client'
-                                ? 'client 模式：保活由 Server 负责，本机已强制关闭（避免双路刷新撞飞 refresh_token）'
-                                : '当前账号只做权威回流；非活跃账号按独占策略保活刷新（保存后生效）'}
+                                ? 'In client mode: Server handles keepalive; disabled locally (avoids double refresh invalidating refresh_token).'
+                                : 'Current account is authoritative sync only; inactive accounts refreshed by exclusive policy (after save).'}
                         </span>
                     </div>
                     <label className="toggle">
@@ -326,16 +343,16 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                         <span className="toggle-slider"></span>
                         <span className={`toggle-text ${settings.background_refresh && settings.remote_mode !== 'client' ? 'on' : ''}`}>
                             {settings.remote_mode === 'client'
-                                ? 'Server 负责'
-                                : settings.background_refresh ? '已开启' : '已关闭'}
+                                ? 'Server managed'
+                                : settings.background_refresh ? 'On' : 'Off'}
                         </span>
                     </label>
                 </div>
 
                 <div className="setting-item">
                     <div className="setting-info">
-                        <span className="setting-label">智能切号允许 FREE 账号</span>
-                        <span className="setting-desc">点击“切换下一个账号”时，是否允许自动寻找并切到 FREE 账号（默认优先付费账号）</span>
+                        <span className="setting-label">Allow FREE in smart switch</span>
+                        <span className="setting-desc">When switching next, allow FREE accounts (default prefers paid)</span>
                     </div>
                     <label className="toggle">
                         <input
@@ -349,9 +366,9 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
 
                 <div className="setting-item">
                     <div className="setting-info">
-                        <span className="setting-label">中转 / Plan / 三方 出问题时切回订阅号</span>
+                        <span className="setting-label">Fallback to subscription when relay/plan/third-party fails</span>
                         <span className="setting-desc">
-                            开启（默认）：current 是中转 / Coding Plan / 三方 API 时，遇到 401/429/quota 自动切到健康的订阅号，避免请求卡死。关闭后这类号出错会把错误透传给客户端，不偷换。
+                            On (default): auto fallback to healthy subscription on 401/429/quota. Off: errors pass through.
                         </span>
                     </div>
                     <label className="toggle">
@@ -366,9 +383,9 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
 
                 <div className="setting-item">
                     <div className="setting-info">
-                        <span className="setting-label">自动选号可挑中 中转 / Plan / 三方</span>
+                        <span className="setting-label">Auto pick includes relay / plan / third-party</span>
                         <span className="setting-desc">
-                            关闭（默认）：用订阅号时自动切号 / affinity 不会路由到中转 / Coding Plan / 三方 API，避免偷扣余额。开启后这类号跟订阅号同等参与轮询（量大但要确认你愿意花对应套餐的额度）。
+                            Off (default): auto switch avoids relay/plan/API. On: they participate equally (uses their quota).
                         </span>
                     </div>
                     <label className="toggle">
@@ -384,9 +401,9 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                 {settings.remote_mode === 'client' && (
                     <div className="setting-item">
                         <div className="setting-info">
-                            <span className="setting-label">HTTP 也走本机直连上游</span>
+                            <span className="setting-label">HTTP uses local direct upstream</span>
                             <span className="setting-desc">
-                                开启后 HTTP 也跟 WebSocket 同路，本机直接打上游，不再经 Server 转发；access_token 仍从 Server 拉。适合 Server 出口不稳但本机出口稳的场景。
+                                HTTP same as WebSocket — direct upstream; token still from Server.
                             </span>
                         </div>
                         <label className="toggle">
@@ -403,9 +420,9 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                 {settings.remote_mode === 'client' && (
                     <div className="setting-item">
                         <div className="setting-info">
-                            <span className="setting-label">本机管 current 指针</span>
+                            <span className="setting-label">Local owns current pointer</span>
                             <span className="setting-desc">
-                                开启后本机自己决定 current（不被 Server `/current` 反向同步覆盖），`~/.codex/auth.json` 也由本机自己写。等价于旧 solo 模式（已并入 client）。
+                                Local decides current; not overwritten by Server `/current`; local writes `~/.codex/auth.json` (legacy solo → client).
                             </span>
                         </div>
                         <label className="toggle">
@@ -424,7 +441,7 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                         <>
                             <div className="setting-item sub-item">
                                 <div className="setting-info">
-                                    <span className="setting-label">调度间隔（分钟）</span>
+                                    <span className="setting-label">Scheduler interval (minutes)</span>
                                 </div>
                                 <input
                                     type="number"
@@ -437,8 +454,8 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                             </div>
                             <div className="setting-item sub-item">
                                 <div className="setting-info">
-                                    <span className="setting-label">非活跃保活阈值（天）</span>
-                                    <span className="setting-desc">当账号 last_refresh 超过该阈值时，调度器才会尝试保活刷新</span>
+                                    <span className="setting-label">Inactive keepalive threshold (days)</span>
+                                    <span className="setting-desc">Scheduler refreshes when last_refresh exceeds threshold</span>
                                 </div>
                                 <input
                                     type="number"
@@ -455,12 +472,12 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
             </div >
 
             <div className="settings-section">
-                <h3><Monitor size={16} /> IDE 重载</h3>
+                <h3><Monitor size={16} /> IDE reload</h3>
 
                 <div className="setting-item">
                     <div className="setting-info">
-                        <span className="setting-label">自动重载 IDE</span>
-                        <span className="setting-desc">切换账号后自动重载 IDE 以应用新的 Token</span>
+                        <span className="setting-label">Auto reload IDE</span>
+                        <span className="setting-desc">Reload IDE after switch to apply new token</span>
                     </div>
                     <label className="toggle">
                         <input
@@ -476,8 +493,8 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                     <>
                         <div className="setting-item sub-item">
                             <div className="setting-info">
-                                <span className="setting-label">主力 IDE</span>
-                                <span className="setting-desc">仅重载选中的 IDE</span>
+                                <span className="setting-label">Primary IDE</span>
+                                <span className="setting-desc">Reload selected IDE only</span>
                             </div>
                             <select
                                 className="select-input"
@@ -492,8 +509,8 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
 
                         <div className="setting-item sub-item">
                             <div className="setting-info">
-                                <span className="setting-label">使用杀进程重启</span>
-                                <span className="setting-desc">使用 pkill 方式重启（Windsurf 推荐，无需权限）</span>
+                                <span className="setting-label">Use kill-process restart</span>
+                                <span className="setting-desc">pkill restart (recommended for Windsurf, no permissions)</span>
                             </div>
                             <label className="toggle">
                                 <input
@@ -509,14 +526,14 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
             </div>
 
             <div className="settings-section">
-                <h3><Radio size={16} /> Remote Mode（局域网同步）</h3>
+                <h3><Radio size={16} /> Remote Mode (LAN sync)</h3>
 
                 <div className="setting-item">
                     <div className="setting-info">
-                        <span className="setting-label">工作模式</span>
+                        <span className="setting-label">Work mode</span>
                         <span className="setting-desc">
-                            off=独立；server=Server 侧提供 API；client=本机，rt 旋转走 Server。
-                            老 solo 模式已合并到 client（自动迁移：solo → client + 本机直连上游 + 本机管 current）。
+                            off=standalone; server=Server API; client=local, RT rotation via Server.
+                            Legacy solo merged into client (solo → client + local upstream + local current).
                         </span>
                     </div>
                     <select
@@ -524,9 +541,9 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                         value={settings.remote_mode}
                         onChange={e => updateField('remote_mode', e.target.value)}
                     >
-                        <option value="off">off（关闭）</option>
-                        <option value="server">server（Server 侧）</option>
-                        <option value="client">client（本机）</option>
+                        <option value="off">off (disabled)</option>
+                        <option value="server">server (Server side)</option>
+                        <option value="client">client (local)</option>
                     </select>
                 </div>
 
@@ -534,8 +551,8 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                     <>
                         <div className="setting-item sub-item">
                             <div className="setting-info">
-                                <span className="setting-label">监听端口</span>
-                                <span className="setting-desc">Server 侧 HTTP API 端口（默认 18081）</span>
+                                <span className="setting-label">Listen port</span>
+                                <span className="setting-desc">Server HTTP API port (default 18081)</span>
                             </div>
                             <input
                                 type="number"
@@ -549,8 +566,8 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
 
                         <div className="setting-item sub-item">
                             <div className="setting-info">
-                                <span className="setting-label">绑定地址</span>
-                                <span className="setting-desc">0.0.0.0 监听所有网卡；建议仅暴露给 ZeroTier 网段</span>
+                                <span className="setting-label">Bind address</span>
+                                <span className="setting-desc">0.0.0.0 = all interfaces; expose to ZeroTier only if possible</span>
                             </div>
                             <input
                                 type="text"
@@ -563,8 +580,8 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
 
                         <div className="setting-item sub-item">
                             <div className="setting-info">
-                                <span className="setting-label">共享密钥</span>
-                                <span className="setting-desc">客户端访问需携带 X-Auth-Token；留空则拒绝所有请求</span>
+                                <span className="setting-label">Shared secret</span>
+                                <span className="setting-desc">Clients need X-Auth-Token; empty rejects all</span>
                             </div>
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                                 <input
@@ -573,29 +590,29 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                                     style={{ minWidth: 260, fontFamily: 'monospace', fontSize: 12 }}
                                     value={settings.remote_shared_secret}
                                     onChange={e => updateField('remote_shared_secret', e.target.value)}
-                                    placeholder="（未设置）"
+                                    placeholder="(not set)"
                                 />
                                 <button
                                     className="action-button"
                                     onClick={handleGenerateSecret}
                                     disabled={remoteBusy}
                                 >
-                                    生成
+                                    Generate
                                 </button>
                             </div>
                         </div>
 
                         <div className="setting-item sub-item">
                             <div className="setting-info">
-                                <span className="setting-label">重启 HTTP 服务</span>
-                                <span className="setting-desc">修改端口/绑定/密钥后点此应用（保存设置后）</span>
+                                <span className="setting-label">Restart HTTP service</span>
+                                <span className="setting-desc">Apply after changing port/bind/secret (after Save Settings)</span>
                             </div>
                             <button
                                 className="action-button"
                                 onClick={handleRemoteRestart}
                                 disabled={remoteBusy}
                             >
-                                {remoteBusy ? '执行中...' : '立即重启'}
+                                {remoteBusy ? 'Running...' : 'Restart now'}
                             </button>
                         </div>
                     </>
@@ -605,8 +622,8 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                     <>
                         <div className="setting-item sub-item">
                             <div className="setting-info">
-                                <span className="setting-label">Server API 地址（主）</span>
-                                <span className="setting-desc">优先尝试，建议填局域网 IP，如 http://192.168.2.14:18081</span>
+                                <span className="setting-label">Server API URL (primary)</span>
+                                <span className="setting-desc">Try first; LAN IP e.g. http://192.168.2.14:18081</span>
                             </div>
                             <input
                                 type="text"
@@ -620,8 +637,8 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
 
                         <div className="setting-item sub-item">
                             <div className="setting-info">
-                                <span className="setting-label">Server API 地址（回退）</span>
-                                <span className="setting-desc">主不通时自动切换，建议填 ZeroTier IP，如 http://172.26.96.198:18081</span>
+                                <span className="setting-label">Server API URL (fallback)</span>
+                                <span className="setting-desc">When primary fails; ZeroTier IP e.g. http://172.26.96.198:18081</span>
                             </div>
                             <input
                                 type="text"
@@ -635,8 +652,8 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
 
                         <div className="setting-item sub-item">
                             <div className="setting-info">
-                                <span className="setting-label">共享密钥</span>
-                                <span className="setting-desc">必须与 Server 端一致</span>
+                                <span className="setting-label">Shared secret</span>
+                                <span className="setting-desc">Must match Server</span>
                             </div>
                             <input
                                 type="text"
@@ -644,27 +661,27 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                                 style={{ minWidth: 260, fontFamily: 'monospace', fontSize: 12 }}
                                 value={settings.remote_shared_secret}
                                 onChange={e => updateField('remote_shared_secret', e.target.value)}
-                                placeholder="（未设置）"
+                                placeholder="(not set)"
                             />
                         </div>
 
                         <div className="setting-item sub-item">
                             <div className="setting-info">
-                                <span className="setting-label">同步操作</span>
-                                <span className="setting-desc">测试连通性 / 推送本机账号 / 从 Server 合并</span>
+                                <span className="setting-label">Sync actions</span>
+                                <span className="setting-desc">Test connectivity / push local accounts / merge from Server</span>
                             </div>
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                                 <button className="action-button" onClick={handleRemoteTest} disabled={remoteBusy}>
-                                    测试连接
+                                    Test connection
                                 </button>
                                 <button className="action-button" onClick={handleRemotePushAll} disabled={remoteBusy}>
-                                    推送全部
+                                    Push all
                                 </button>
                                 <button className="action-button" onClick={handleRemotePullAll} disabled={remoteBusy}>
-                                    拉取合并
+                                    Pull merge
                                 </button>
                                 <button className="action-button" onClick={handleRemotePullAllTokens} disabled={remoteBusy}>
-                                    同步所有 token
+                                    Sync all tokens
                                 </button>
                             </div>
                         </div>
@@ -673,10 +690,10 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                             <>
                                 <div className="setting-item sub-item">
                                     <div className="setting-info">
-                                        <span className="setting-label">自动同号</span>
+                                        <span className="setting-label">Auto same account</span>
                                         <span className="setting-desc">
-                                            心跳时自动把本机 current 对齐到 Server 的 current。
-                                            Server 不可达会静默跳过，保持本机现状。
+                                            On heartbeat align local current to Server current.
+                                            If Server unreachable, skip silently and keep local state.
                                         </span>
                                     </div>
                                     <label className="toggle">
@@ -691,15 +708,15 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
 
                                 <div className="setting-item sub-item">
                                     <div className="setting-info">
-                                        <span className="setting-label">立即同号</span>
-                                        <span className="setting-desc">手工拉取 Server 当前账号并热切过去（自动同号关了也可用）</span>
+                                        <span className="setting-label">Switch to same account now</span>
+                                        <span className="setting-desc">Manually pull Server current account and hot-switch (works when auto same is off)</span>
                                     </div>
                                     <button
                                         className="action-button"
                                         onClick={handleSoloSyncNow}
                                         disabled={remoteBusy}
                                     >
-                                        {remoteBusy ? '执行中...' : '立即同号'}
+                                        {remoteBusy ? 'Running...' : 'Switch to same account now'}
                                     </button>
                                 </div>
                             </>
@@ -718,14 +735,14 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
 
             {onSetSessionAnchor && (
                 <div className="settings-section">
-                    <h3><Smartphone size={16} /> Codex.app 手机锚绑定</h3>
+                    <h3><Smartphone size={16} /> Codex.app phone anchor</h3>
                     <div className="setting-item">
                         <div className="setting-info">
-                            <span className="setting-label">当前绑定账号</span>
+                            <span className="setting-label">Current bound account</span>
                             <span className="setting-desc">
-                                磁盘 ~/.codex/auth.json 永远跟随此号，Codex.app 手机远程连接绑定此号；
-                                切到其他号时 disk 不动、proxy 出口照切（手机 bridge 不掉线）。
-                                仅 ChatGPT 订阅号可绑定。
+                                Disk ~/.codex/auth.json always follows this account; Codex.app phone remote binds here.
+                                Switching others moves proxy only; disk unchanged (phone bridge stays up).
+                                Only ChatGPT subscription accounts can bind.
                             </span>
                         </div>
                         <div className="anchor-actions">
@@ -736,17 +753,17 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                                         <span className={`anchor-current-plan plan-${(anchorAccount.cached_quota?.plan_type || 'unknown').toLowerCase()}`}>
                                             {anchorAccount.cached_quota?.plan_type
                                                 ? anchorAccount.cached_quota.plan_type.toUpperCase()
-                                                : '未知'}
+                                                : 'Unknown'}
                                         </span>
                                     </>
-                                ) : '未绑定'}
+                                ) : 'Unbound'}
                             </span>
                             <button
                                 className="action-button"
                                 onClick={() => { setAnchorSearch(''); setShowAnchorPicker(true); }}
                                 disabled={anchorBusy}
                             >
-                                {anchorAccount ? '更换' : '选择绑定账号'}
+                                {anchorAccount ? 'Replace' : 'Select bind account'}
                             </button>
                             {anchorAccount && (
                                 <button
@@ -754,7 +771,7 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                                     onClick={handleUnbindAnchor}
                                     disabled={anchorBusy}
                                 >
-                                    解除
+                                    Unbind
                                 </button>
                             )}
                         </div>
@@ -763,18 +780,18 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
             )}
 
             <div className="settings-section danger">
-                <h3><Wrench size={16} /> 故障修复</h3>
+                <h3><Wrench size={16} /> Troubleshooting</h3>
                 <div className="setting-item">
                     <div className="setting-info">
-                        <span className="setting-label">修复 Codex App 闪退</span>
-                        <span className="setting-desc">移除 macOS 安全隔离属性 (需要管理员权限)</span>
+                        <span className="setting-label">Fix Codex App crash</span>
+                        <span className="setting-desc">Remove macOS quarantine attributes (admin required)</span>
                     </div>
                     <button
                         className="action-button warning"
                         onClick={handleRepair}
                         disabled={repairing}
                     >
-                        {repairing ? '修复中...' : '立即修复'}
+                        {repairing ? 'Repairing...' : 'Fix now'}
                     </button>
                 </div>
             </div>
@@ -784,16 +801,16 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                     <div className="anchor-picker" onClick={e => e.stopPropagation()}>
                         <div className="anchor-picker-header">
                             <div>
-                                <h3>选择手机锚账号</h3>
+                                <h3>Select phone anchor account</h3>
                                 <p className="anchor-picker-hint">
-                                    仅 ChatGPT 订阅号可绑定（Codex.app 远程连接需要 chatgpt_account_id 鉴权）
+                                    Only ChatGPT subscription accounts (Codex.app remote needs chatgpt_account_id)
                                 </p>
                             </div>
                             <button
                                 className="anchor-picker-close"
                                 onClick={() => setShowAnchorPicker(false)}
                                 disabled={anchorBusy}
-                                title="关闭"
+                                title="Close"
                             >
                                 <X size={16} />
                             </button>
@@ -802,7 +819,7 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                             <Search size={14} />
                             <input
                                 type="text"
-                                placeholder="搜索邮箱 / 订阅类型 (如 team / pro / free)…"
+                                placeholder="Search email / plan (team / pro / free)…"
                                 value={anchorSearch}
                                 onChange={e => setAnchorSearch(e.target.value)}
                                 autoFocus
@@ -812,13 +829,13 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                             {filteredAnchorCandidates.length === 0 ? (
                                 <div className="anchor-picker-empty">
                                     {anchorCandidates.length === 0
-                                        ? '当前没有 ChatGPT 订阅号'
-                                        : '没有匹配的账号'}
+                                        ? 'No ChatGPT subscription accounts'
+                                        : 'No matching accounts'}
                                 </div>
                             ) : (
                                 filteredAnchorCandidates.map(acc => {
                                     const plan = acc.cached_quota?.plan_type;
-                                    const planLabel = plan ? plan.toUpperCase() : '未知';
+                                    const planLabel = plan ? plan.toUpperCase() : 'Unknown';
                                     const planClass = (plan || 'unknown').toLowerCase();
                                     return (
                                         <button
@@ -830,7 +847,7 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
                                             <span className="anchor-picker-name">{acc.name}</span>
                                             <span className={`anchor-picker-plan plan-${planClass}`}>{planLabel}</span>
                                             {acc.is_session_anchor && (
-                                                <span className="anchor-picker-tag">✓ 当前绑定</span>
+                                                <span className="anchor-picker-tag">✓ Current bound</span>
                                             )}
                                         </button>
                                     );
@@ -842,11 +859,11 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
             )}
 
             <div className="settings-section">
-                <h3><Github size={16} /> 关于</h3>
+                <h3><Github size={16} /> About</h3>
                 <div className="setting-item">
                     <div className="setting-info">
                         <span className="setting-label">Codex Switcher</span>
-                        <span className="setting-desc">多账号智能切换 + 本地代理 + 用量统计</span>
+                        <span className="setting-desc">Multi-account switching + local proxy + usage statistics</span>
                     </div>
                     <a
                         className="action-button github-link"

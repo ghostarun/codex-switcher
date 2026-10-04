@@ -10,6 +10,13 @@ default-run = "codex-switcher"
 name = "codex_switcher_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Bare `cargo build` must enable this; `tauri build` injects it automatically.
+# Without it the WebView loads http://localhost:1420 and shows
+# "Could not connect to localhost: Connection refused".
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

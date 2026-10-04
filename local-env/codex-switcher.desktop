@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Codex Switcher
+Name[en]=Codex Switcher
+GenericName=Codex Account Switcher
+Comment=English Codex Switcher (AppDir + system WebKit)
+Keywords=codex;switcher;account;proxy;
+Exec=/home/light-tarun/.local/bin/codex-switcher %U
+TryExec=/home/light-tarun/.local/bin/codex-switcher
+Icon=codex-switcher
+Terminal=false
+Categories=Utility;
+StartupNotify=true
+StartupWMClass=codex-switcher
+MimeType=x-scheme-handler/codexswitch;x-scheme-handler/ccswitch;

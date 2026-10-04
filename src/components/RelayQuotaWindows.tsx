@@ -7,16 +7,16 @@ export function RelayQuotaWindows({ cache, onlyGemini = false }: { cache: RelayU
     useEffect(()=>{const timer=setInterval(()=>setNow(Date.now()),1000);return ()=>clearInterval(timer);},[]);
     const updated=Date.parse(cache.updated_at);
     const stale=!Number.isFinite(updated)||now-updated>180_000;
-    return <div className="quota-grid" title={`最后更新：${Number.isFinite(updated)?new Date(updated).toLocaleString():'未知'}`}>
+    return <div className="quota-grid" title={`Last updated: ${Number.isFinite(updated)?new Date(updated).toLocaleString():'Unknown'}`}>
         {cache.windows?.filter(window => !onlyGemini || /gemini models/i.test(window.label)).map(window=>{
             const pct=window.remaining_percent;
             const known=typeof pct==='number'&&Number.isFinite(pct);
             const tone=known?(pct>50?'green':pct>20?'orange':'red'):'muted';
             const seconds=window.reset_at==null?null:Math.max(0,Math.ceil(window.reset_at-now/1000));
             const minutes=seconds==null?null:Math.ceil(seconds/60);
-            const reset=minutes==null?'--':minutes===0?'待刷新':minutes>=1440?`${Math.floor(minutes/1440)}天 ${Math.floor(minutes%1440/60)}时`:minutes>=60?`${Math.floor(minutes/60)}时 ${minutes%60}分`:`${minutes}分`;
+            const reset=minutes==null?'--':minutes===0?'Pending':minutes>=1440?`${Math.floor(minutes/1440)}d ${Math.floor(minutes%1440/60)}h`:minutes>=60?`${Math.floor(minutes/60)}h ${minutes%60}m`:`${minutes}m`;
             const compactLabel = /gemini models/i.test(window.label) ? `Gemini ${/7d|周/i.test(window.label) ? '7D' : '5H'}` : /claude and gpt/i.test(window.label) ? `Claude/GPT ${/7d|周/i.test(window.label) ? '7D' : '5H'}` : window.label;
-            return <div className="quota-mini-card" key={window.label} aria-label={`${compactLabel} 剩余 ${known?`${Math.round(pct)}%`:'未知'}`}>
+            return <div className="quota-mini-card" key={window.label} aria-label={`${compactLabel} ${known?`${Math.round(pct)}%`:'unknown'} left`}>
                 {known&&<div className={`quota-mini-bg ${tone}`} style={{width:`${Math.min(100,Math.max(0,pct))}%`}}/>}
                 <div className="quota-mini-content">
                     <span className="quota-label">{compactLabel}</span>
@@ -25,7 +25,7 @@ export function RelayQuotaWindows({ cache, onlyGemini = false }: { cache: RelayU
                 </div>
             </div>;
         })}
-        {stale&&<span style={{fontSize:11,color:'var(--text-secondary)',gridColumn:'1 / -1'}}>上次数据已过期，请刷新额度</span>}
+        {stale&&<span style={{fontSize:11,color:'var(--text-secondary)',gridColumn:'1 / -1'}}>Data stale — refresh quota</span>}
     </div>;
 }
 
@@ -45,12 +45,12 @@ export function AgyRelayModelQuotas({ cache, models }: { cache: RelayUsageCache 
                 const known = typeof pct === 'number' && Number.isFinite(pct);
                 const tone = known ? (pct > 50 ? 'green' : pct > 20 ? 'orange' : 'red') : 'muted';
                 const seconds = window.reset_at == null ? null : Math.max(0, Math.ceil(window.reset_at - nowSeconds()));
-                const reset = seconds == null ? '--' : seconds >= 86400 ? `${Math.floor(seconds / 86400)}天 ${Math.floor(seconds % 86400 / 3600)}时` : seconds >= 3600 ? `${Math.floor(seconds / 3600)}时 ${Math.floor(seconds % 3600 / 60)}分` : `${Math.ceil(seconds / 60)}分`;
+                const reset = seconds == null ? '--' : seconds >= 86400 ? `${Math.floor(seconds / 86400)}d ${Math.floor(seconds % 86400 / 3600)}h` : seconds >= 3600 ? `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m` : `${Math.ceil(seconds / 60)}m`;
                 const label = /7d|周/i.test(window.label) ? '7D' : '5H';
                 return <div className="quota-mini-card" key={window.label}>{known && <div className={`quota-mini-bg ${tone}`} style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />}<div className="quota-mini-content"><span className="quota-label">{label}</span><span className="quota-time"><Clock size={12} />{reset}</span><span className={`quota-percent ${tone}`}>{known ? `${Math.round(pct)}%` : '--'}</span></div></div>;
             })}</div>
         </div>)}
-        {models.length > 4 && <button type="button" className="google-quota-toggle" onClick={() => setExpanded(value => !value)}>{expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}{expanded ? '收起全部模型' : '查看全部模型'}（{models.length}）</button>}
+        {models.length > 4 && <button type="button" className="google-quota-toggle" onClick={() => setExpanded(value => !value)}>{expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}{expanded ? 'Collapse models' : 'View all models'} ({models.length})</button>}
     </div>;
 }
 

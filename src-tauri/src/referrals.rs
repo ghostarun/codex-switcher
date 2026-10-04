@@ -8,7 +8,7 @@ fn context(program: &str) -> Result<Value, String> {
         "codex_referral_consumer" | "codex_referral_workspace" => {
             Ok(json!({"program_id": program, "entrypoint": "persistent"}))
         }
-        _ => Err("不支持的邀请活动类型".into()),
+        _ => Err("Unsupported referral campaign type".into()),
     }
 }
 
@@ -36,18 +36,18 @@ fn request(
 
 async fn response(req: reqwest::RequestBuilder, sending: bool) -> Result<Value, String> {
     let uncertain = if sending {
-        "；发送结果未确认，请先查询邀请记录，勿直接重发"
+        "; delivery is unconfirmed. Check the invite records before retrying."
     } else {
         ""
     };
     let resp = req
         .send()
         .await
-        .map_err(|e| format!("邀请接口网络错误：{e}{uncertain}"))?;
+        .map_err(|e| format!("Referral request network error: {e}{uncertain}"))?;
     let status = resp.status();
     let data = resp.json::<Value>().await.map_err(|_| {
         format!(
-            "邀请接口返回 HTTP {} 非 JSON 响应，可能需要官方桌面版登录会话；无法确认活动资格{}",
+            "Referral API returned a non-JSON HTTP {} response. An official desktop login session may be required; campaign eligibility could not be confirmed.{}",
             status.as_u16(),
             uncertain
         )
@@ -57,7 +57,7 @@ async fn response(req: reqwest::RequestBuilder, sending: bool) -> Result<Value, 
         let message = detail
             .as_str()
             .or_else(|| detail.get("message").and_then(Value::as_str))
-            .unwrap_or("请求被上游拒绝");
+            .unwrap_or("Request rejected by upstream");
         let failed = detail
             .get("failed_emails")
             .or_else(|| data.get("failed_emails"));
@@ -65,12 +65,12 @@ async fn response(req: reqwest::RequestBuilder, sending: bool) -> Result<Value, 
             "HTTP {}：{}{}{}",
             status.as_u16(),
             message,
-            failed.map(|v| format!("；邮箱：{v}")).unwrap_or_default(),
+            failed.map(|v| format!("; email: {v}")).unwrap_or_default(),
             uncertain
         ));
     }
     if !data.is_object() {
-        return Err(format!("邀请接口响应格式无法识别{uncertain}"));
+        return Err(format!("Unrecognized referral API response format{uncertain}"));
     }
     Ok(data)
 }
@@ -104,7 +104,7 @@ pub async fn tracking(
     }
     let data = response(req, false).await?;
     if !data["items"].is_array() {
-        return Err("邀请记录响应缺少 items，无法确认记录".into());
+        return Err("Invite-record response is missing items; the records could not be confirmed.".into());
     }
     Ok(data)
 }
@@ -117,12 +117,12 @@ fn send_body(
 ) -> Result<Value, String> {
     let mut body = context(program)?;
     if offer["should_show"] != true {
-        return Err("当前账号没有可发送的邀请活动，请刷新资格".into());
+        return Err("The current account has no eligible referral campaign. Refresh eligibility.".into());
     }
     // Detect an offer change between review and submission, including grant amounts.
     for key in ["offer_id", "grants", "requires_explicit_confirmation"] {
         if offer[key] != expected[key] {
-            return Err("邀请奖励或活动条件已变化，请刷新资格后确认".into());
+            return Err("Referral rewards or campaign requirements changed. Refresh eligibility and confirm again.".into());
         }
     }
     let mut seen = std::collections::HashSet::new();
@@ -145,11 +145,11 @@ fn send_body(
         cap = cap.min(offer["remaining_reward_capacity"].as_u64().unwrap_or(0));
     }
     if emails.is_empty() || emails.len() as u64 > cap {
-        return Err(format!("本次最多可邀请 {cap} 个邮箱"));
+        return Err(format!("You can invite at most {cap} email address(es) at a time."));
     }
     let email_re = regex::Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap();
     if emails.iter().any(|e| !email_re.is_match(e)) {
-        return Err("邮箱格式不正确".into());
+        return Err("Invalid email address format.".into());
     }
     body["emails"] = json!(emails);
     Ok(body)
@@ -171,7 +171,7 @@ pub async fn send(
     )
     .await?;
     if !data["invites"].is_array() {
-        return Err("发送结果缺少 invites，请先查询邀请记录，勿直接重发".into());
+        return Err("The send result is missing invites. Check the invite records before retrying.".into());
     }
     Ok(data)
 }

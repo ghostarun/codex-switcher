@@ -167,13 +167,13 @@ impl AppState {
         let now = Utc::now();
         match slot.take() {
             Some(stored) if stored.expires_at < now => {
-                Err("安全确认已过期，请重新点击修复".to_string())
+                Err("Security confirmation expired. Click Fix again.".to_string())
             }
             Some(stored) if stored.value != provided_ticket => {
-                Err("安全确认无效，请重新点击修复".to_string())
+                Err("Invalid security confirmation. Click Fix again.".to_string())
             }
             Some(_) => Ok(()),
-            None => Err("缺少安全确认，请重新点击修复".to_string()),
+            None => Err("Security confirmation is missing. Click Fix again.".to_string()),
         }
     }
 }
@@ -214,6 +214,7 @@ pub struct ProxyStatus {
     pub enabled: bool,
     pub port: u16,
     pub is_running: bool,
+    pub desktop_proxy_configured: bool,
     pub base_url: String,
     pub allow_lan: bool,
     pub lan_base_url: Option<String>,
@@ -270,6 +271,7 @@ fn get_proxy_status(state: State<AppState>) -> Result<ProxyStatus, String> {
         enabled: store.settings.proxy_enabled,
         port: store.settings.proxy_port,
         is_running,
+        desktop_proxy_configured: codex_desktop_proxy_configured(store.settings.proxy_port),
         base_url: format!("http://localhost:{}/v1", store.settings.proxy_port),
         allow_lan: store.settings.proxy_allow_lan,
         lan_base_url: if store.settings.proxy_allow_lan {
@@ -288,6 +290,11 @@ fn get_proxy_status(state: State<AppState>) -> Result<ProxyStatus, String> {
     })
 }
 
+#[tauri::command]
+fn toggle_quota_overlay(app: tauri::AppHandle) -> Result<bool, String> {
+    tray::toggle_quota_overlay(&app)
+}
+
 /// 更新全局设置
 #[tauri::command]
 fn update_settings(
@@ -295,6 +302,9 @@ fn update_settings(
     app: tauri::AppHandle,
     mut settings: account::AppSettings,
 ) -> Result<(), String> {
+    if !matches!(settings.quota_widget_identity.as_str(), "number" | "emoji") {
+        return Err("Quota widget identity must be number or emoji".to_string());
+    }
     // client 模式硬约束：本机不做保活（保活由 Server 负责）
     // quota_refresh_enabled 在 client 模式下被用作"Server 状态同步循环"的开关；
     // 即使用户把它关掉，我们也始终会启动该循环（见下面启动条件）。
@@ -446,6 +456,71 @@ fn update_settings(
     Ok(())
 }
 
+#[tauri::command]
+fn disable_switcher_routing(
+    state: State<AppState>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    let (auth, port) = {
+        let mut store = state.store.lock().map_err(|e| e.to_string())?;
+        let auth = store
+            .current
+            .as_deref()
+            .and_then(|id| store.accounts.get(id))
+            .filter(|account| account.is_openai_account())
+            .map(Account::to_codex_auth_value);
+        let port = store.settings.proxy_port;
+
+        for account in store.accounts.values_mut() {
+            account.is_session_anchor = false;
+        }
+        store.settings.proxy_enabled = false;
+        store.settings.background_refresh = false;
+        store.settings.quota_refresh_enabled = false;
+        store.settings.remote_mode = "off".to_string();
+        store.settings.client_owns_current = false;
+        store.settings.solo_auto_sync_current = false;
+        store.save()?;
+        (auth, port)
+    };
+
+    state.ws_disconnect.notify_waiters();
+    for handle in [
+        &state.proxy_handle,
+        &state.scheduler,
+        &state.quota_refresh_handle,
+        &state.solo_heartbeat_handle,
+        &state.remote_server_handle,
+    ] {
+        if let Some(handle) = handle.lock().map_err(|e| e.to_string())?.take() {
+            handle.abort();
+        }
+    }
+    crate::tray::update_tray_menu(&app);
+
+    let auth_result = auth.map_or(Ok(()), |auth| AccountStore::write_codex_auth(&auth));
+    let env_result = set_proxy_env(port, false).and_then(|status| {
+        if status.contains("config.toml (failed:") {
+            Err(format!("Failed to remove Codex Desktop proxy routing: {status}"))
+        } else {
+            Ok(status)
+        }
+    });
+    let _ = app.emit("settings-updated", ());
+    let _ = app.emit("accounts-updated", ());
+    match (auth_result, env_result) {
+        (Err(auth), Err(env)) => Err(format!(
+            "Failed to restore native auth.json: {auth}; failed to remove proxy routing: {env}"
+        )),
+        (Err(auth), _) => Err(format!("Failed to restore native auth.json: {auth}")),
+        (_, Err(env)) => Err(format!("Failed to remove proxy routing: {env}")),
+        (Ok(()), Ok(_)) => Ok(
+            "Switcher routing is disabled. Restart Codex Desktop to use native authentication."
+                .to_string(),
+        ),
+    }
+}
+
 /// 从当前 Codex 登录状态导入账号
 #[tauri::command]
 fn import_current_account(
@@ -456,7 +531,7 @@ fn import_current_account(
 ) -> Result<Account, String> {
     let auth_json = AccountStore::read_codex_auth()?;
     if AccountStore::extract_refresh_token(&auth_json).is_none() {
-        return Err("当前 auth.json 缺少 refresh_token，无法自动续期，请重新登录".to_string());
+        return Err("The current auth.json has no refresh_token and cannot be renewed. Please sign in again.".to_string());
     }
 
     let account = {
@@ -555,6 +630,48 @@ fn update_account(
     Ok(())
 }
 
+#[tauri::command]
+fn set_quota_widget_identity(
+    state: State<AppState>,
+    app: tauri::AppHandle,
+    id: String,
+    number: Option<u16>,
+    emoji: Option<String>,
+) -> Result<(), String> {
+    const EMOJI_OPTIONS: &[&str] = &[
+        "📱", "⭐", "⚡", "🌙", "🔥", "🚀", "🧠", "💎", "🟢", "🔵", "🟣", "🟠", "🌸", "🐼",
+    ];
+    if number.is_some_and(|value| !(1..=9999).contains(&value)) {
+        return Err("Widget number must be between 1 and 9999".to_string());
+    }
+    let emoji = emoji.filter(|value| !value.is_empty());
+    if emoji
+        .as_deref()
+        .is_some_and(|value| !EMOJI_OPTIONS.contains(&value))
+    {
+        return Err("Choose a symbol from the widget list".to_string());
+    }
+
+    {
+        let mut store = state.store.lock().map_err(|e| e.to_string())?;
+        if let Some(value) = number {
+            if store
+                .accounts
+                .iter()
+                .any(|(other_id, account)| other_id != &id && account.widget_number == Some(value))
+            {
+                return Err(format!("Widget number {value} is already assigned"));
+            }
+        }
+        let account = store.accounts.get_mut(&id).ok_or("Account not found")?;
+        account.widget_number = number;
+        account.widget_emoji = emoji;
+        store.save()?;
+    }
+    crate::tray::update_tray_menu(&app);
+    Ok(())
+}
+
 /// 为单个 ChatGPT 订阅账号配置 5h / 7d「周期保鲜」。
 /// 真正请求由常驻 quota loop 在 reset_at 到点后执行；client/solo 只保存并由前端推到 Server。
 #[tauri::command]
@@ -570,9 +687,9 @@ fn set_account_window_priming(
         let account = store
             .accounts
             .get_mut(&id)
-            .ok_or_else(|| format!("账号不存在: {}", id))?;
+            .ok_or_else(|| format!("Account not found: {}", id))?;
         if (five_hour_enabled || weekly_enabled) && !account.is_chatgpt_oauth() {
-            return Err("仅 ChatGPT OAuth 订阅账号支持周期保鲜".to_string());
+            return Err("Window priming is only supported for ChatGPT OAuth subscription accounts.".to_string());
         }
         // 主窗口语义完全服从 wham/usage 返回的时长；不把套餐名称写死。
         // 兼容短暂存在过的双开关客户端：任一开关开启都解释为“启用该套餐主窗口”，
@@ -648,7 +765,7 @@ fn set_session_anchor(state: State<AppState>, id: String, enabled: bool) -> Resu
             let acc = store
                 .accounts
                 .get(&id)
-                .ok_or_else(|| format!("账号不存在: {}", id))?;
+                .ok_or_else(|| format!("Account not found: {}", id))?;
             (Some(acc.to_codex_auth_value()), after, "set")
         } else {
             // 取消 anchor → 把当前 current 写盘（无 current 则跳过）
@@ -818,13 +935,13 @@ async fn add_relay_account(
 ) -> Result<Account, String> {
     let trimmed_url = base_url.trim();
     if !(trimmed_url.starts_with("https://") || trimmed_url.starts_with("http://")) {
-        return Err("base_url 必须以 http:// 或 https:// 开头".to_string());
+        return Err("base_url must start with http:// or https://.".to_string());
     }
     if api_key.trim().is_empty() {
-        return Err("api_key 不能为空".to_string());
+        return Err("api_key cannot be empty.".to_string());
     }
     if name.trim().is_empty() {
-        return Err("name 不能为空".to_string());
+        return Err("Name cannot be empty.".to_string());
     }
 
     let (account, should_push) = {
@@ -900,9 +1017,9 @@ fn update_relay_model_map(
     let acc = store
         .accounts
         .get_mut(&id)
-        .ok_or_else(|| format!("账号 {} 不存在", id))?;
+        .ok_or_else(|| format!("Account {} not found", id))?;
     if !acc.is_relay() {
-        return Err("不是中转站账号".to_string());
+        return Err("This is not a relay account.".to_string());
     }
     acc.relay_model_map = model_map;
     acc.relay_model_fallback = model_fallback
@@ -940,13 +1057,13 @@ async fn refresh_relay_usage(
     }
     let (base_url, api_key, preset, usage_cookie) = {
         let store = state.store.lock().map_err(|e| e.to_string())?;
-        let acc = store.accounts.get(&id).ok_or("账号不存在")?;
+        let acc = store.accounts.get(&id).ok_or("Account not found")?;
         if !acc.is_relay() {
-            return Err("不是中转站账号".into());
+            return Err("This is not a relay account.".into());
         }
-        let base = acc.relay_base_url.clone().ok_or("中转站账号缺 base_url")?;
+        let base = acc.relay_base_url.clone().ok_or("Relay account is missing base_url")?;
         let key =
-            AccountStore::extract_access_token(&acc.auth_json).ok_or("中转站账号缺 api_key")?;
+            AccountStore::extract_access_token(&acc.auth_json).ok_or("Relay account is missing api_key")?;
         let preset = acc.relay_usage_preset.clone();
         let usage_cookie = acc.relay_usage_cookie.clone();
         (base, key, preset, usage_cookie)
@@ -966,7 +1083,7 @@ async fn refresh_relay_usage(
                 }
                 Some(p)
             }
-            None => return Err("自动探测未命中：上游不支持 /v1/dashboard/billing 或 /v1/usage（可手动选 usage 策略，或保持「不拉取」）".to_string()),
+            None => return Err("Auto-detection failed: the provider supports neither /v1/dashboard/billing nor /v1/usage. Choose a usage preset manually or disable usage fetching.".to_string()),
         }
     } else {
         preset
@@ -982,11 +1099,11 @@ async fn refresh_relay_usage(
         Some("glm_zhipu") => UsageFetcher::fetch_relay_usage_glm_zhipu(&base_url, &api_key).await?,
         Some("mimo_token_plan") => {
             let cookie = usage_cookie
-                .ok_or("MiMo 配额查询需要登录 platform.xiaomimimo.com 后复制 Cookie header")?;
+                .ok_or("MiMo quota lookup requires a Cookie header copied after signing in to platform.xiaomimimo.com")?;
             UsageFetcher::fetch_relay_usage_mimo_token_plan(&cookie).await?
         }
-        Some(other) => return Err(format!("未支持的 usage_preset: {}", other)),
-        None => return Err("usage 策略未确定".to_string()),
+        Some(other) => return Err(format!("Unsupported usage_preset: {}", other)),
+        None => return Err("No usage preset selected.".to_string()),
     };
 
     {
@@ -1031,14 +1148,14 @@ async fn save_token_as_account(
     notes: Option<String>,
 ) -> Result<Account, String> {
     if token_res.refresh_token.is_none() {
-        return Err("OAuth 未返回 refresh_token，无法自动续期".to_string());
+        return Err("OAuth did not return a refresh_token; automatic renewal is unavailable.".to_string());
     }
 
     let user_info = token_res
         .id_token
         .as_ref()
         .and_then(|id_t| oauth::parse_user_info(id_t))
-        .ok_or("无法从授权响应中解析用户信息 (Missing ID Token)")?;
+        .ok_or("Could not parse user information from the authorization response (missing ID token)")?;
 
     let (account, is_client_mode) = {
         let mut store = state.store.lock().map_err(|e| e.to_string())?;
@@ -1119,11 +1236,11 @@ async fn force_overwrite_disk_with_current(
         let current_id = store
             .current
             .clone()
-            .ok_or_else(|| "没有当前激活账号".to_string())?;
+            .ok_or_else(|| "No account is currently active.".to_string())?;
         let account = store
             .accounts
             .get(&current_id)
-            .ok_or_else(|| format!("账号 {} 不存在", current_id))?;
+            .ok_or_else(|| format!("Account {} not found", current_id))?;
         account.auth_json.clone()
     };
     AccountStore::write_codex_auth(&auth_json)?;
@@ -1227,9 +1344,9 @@ async fn refresh_antigravity_quota(
 ) -> Result<std::collections::HashMap<String, antigravity::quota::ModelQuota>, String> {
     let client_mode = {
         let store = state.store.lock().map_err(|error| error.to_string())?;
-        let account = store.accounts.get(&id).ok_or("Google 账号不存在")?;
+        let account = store.accounts.get(&id).ok_or("Google account not found")?;
         if !account.is_antigravity_oauth() {
-            return Err("该账号不是 Google Antigravity 账号".to_string());
+            return Err("This is not a Google Antigravity account.".to_string());
         }
         store.settings.remote_mode == "client"
     };
@@ -1240,7 +1357,7 @@ async fn refresh_antigravity_quota(
     let quotas = remote_client::refresh_antigravity_quota(&base, &secret, &id).await?;
     {
         let mut store = state.store.lock().map_err(|error| error.to_string())?;
-        let account = store.accounts.get_mut(&id).ok_or("账号已被删除")?;
+        let account = store.accounts.get_mut(&id).ok_or("Account has been deleted")?;
         antigravity::quota::write_model_quotas(&mut account.auth_json, &quotas);
         store.save()?;
     }
@@ -1309,13 +1426,16 @@ async fn switch_account(
             .map(|account| account.is_antigravity_oauth())
             .unwrap_or(false)
         {
-            return Err("Antigravity 账号由模型路由自动选择，不切换 Codex 当前身份".to_string());
+            return Err("Antigravity accounts are selected automatically by model routing; they do not change the active Codex identity.".to_string());
         }
     }
     // 0. 切换前仅同步“当前激活账号”与官方 auth.json，避免全表匹配导致串号
     if let Ok(current_auth) = AccountStore::read_codex_auth() {
         if let Ok(mut store) = state.store.lock() {
-            if let Some(current_id) = store.current.clone() {
+            // With a phone anchor, disk auth belongs to the anchor, even when
+            // a different account is active behind the proxy.
+            let disk_owner = store.session_anchor_id().or_else(|| store.current.clone());
+            if let Some(current_id) = disk_owner {
                 if store.sync_account_from_auth_json(&current_id, current_auth) {
                     if let Err(e) = store.save() {
                         eprintln!("[Sync] 保存当前账号失败: {}", e);
@@ -1339,7 +1459,7 @@ async fn switch_account(
         let account = store
             .accounts
             .get(&id)
-            .ok_or_else(|| format!("账号 {} 不存在", id))?;
+            .ok_or_else(|| format!("Account {} not found", id))?;
 
         let access_token = account
             .auth_json
@@ -1347,7 +1467,7 @@ async fn switch_account(
             .and_then(|t| t.get("access_token"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-            .ok_or("账号缺少 access_token")?;
+            .ok_or("Account is missing access_token")?;
 
         let refresh_token = account.refresh_token.clone();
 
@@ -1510,6 +1630,20 @@ async fn switch_account(
         let store = state.store.lock().map_err(|e| e.to_string())?;
         account::should_hot_switch(&store.settings, proxy_running)
     };
+    // A phone anchor keeps auth.json on the anchor. Without Desktop proxy
+    // routing, a hot switch only changes the Switcher UI, not Codex quota.
+    if hot {
+        let store = state.store.lock().map_err(|e| e.to_string())?;
+        if store
+            .session_anchor_id()
+            .is_some_and(|anchor| anchor != target_id)
+        {
+            set_codex_config_base_url(Some(&format!(
+                "http://127.0.0.1:{}/v1",
+                store.settings.proxy_port
+            )))?;
+        }
+    }
     println!(
         "[Switch] 执行切换...（模式={}）",
         if hot { "热切" } else { "冷切" }
@@ -1519,7 +1653,7 @@ async fn switch_account(
         .acquire(&target_id, tokio::time::Duration::from_secs(5))
         .await
     {
-        return Err("该账号正在被其他流程刷新，请稍后重试".to_string());
+        return Err("This account is being refreshed by another operation. Try again later.".to_string());
     }
     let switch_result: Result<(), String> = {
         let mut store = state.store.lock().map_err(|e| e.to_string())?;
@@ -1590,10 +1724,10 @@ async fn solo_sync_current(
         )
     };
     if mode != "solo" {
-        return Err("仅 solo 模式支持同号操作".to_string());
+        return Err("Same-account operations are only supported in solo mode.".to_string());
     }
     if secret.is_empty() {
-        return Err("未配置共享密钥".to_string());
+        return Err("Shared secret is not configured.".to_string());
     }
     let base = remote_client::resolve_base_url(&primary, &fallback).await?;
     let before = { state.store.lock().ok().and_then(|s| s.current.clone()) };
@@ -3188,7 +3322,7 @@ pub async fn switch_to_next_account_internal(
     };
 
     if candidates.is_empty() {
-        return Err("没有可用账号".to_string());
+        return Err("No available accounts.".to_string());
     }
 
     // 2. 按得分从高到低尝试，查 API 确认额度后切换
@@ -3250,7 +3384,7 @@ pub async fn switch_to_next_account_internal(
         }
     }
 
-    Err("遍历完所有账号，未发现可用配额的账号".to_string())
+    Err("Checked all accounts; none has available quota.".to_string())
 }
 
 /// 内部辅助：获取额度数据
@@ -3260,13 +3394,13 @@ async fn get_quota_internal(state: &AppState, id: String) -> Result<UsageDisplay
         let store = state.store.lock().map_err(|e| e.to_string())?;
         if let Some(acc) = store.accounts.get(&id) {
             if !acc.is_openai_account() {
-                return Err("PROVIDER_ACCOUNT:该 Provider 账号不支持 OpenAI usage 查询".to_string());
+                return Err("PROVIDER_ACCOUNT:This provider account does not support OpenAI usage queries.".to_string());
             }
         }
     }
     let (access_token, account_id, refresh_token, is_client_or_solo) = {
         let store = state.store.lock().map_err(|e| e.to_string())?;
-        let account = store.accounts.get(&id).ok_or("账号不存在")?;
+        let account = store.accounts.get(&id).ok_or("Account not found")?;
         let at = AccountStore::extract_access_token(&account.auth_json);
         let aid = AccountStore::extract_account_id(&account.auth_json);
         let rt = account.refresh_token.clone();
@@ -3311,7 +3445,7 @@ async fn get_quota_internal(state: &AppState, id: String) -> Result<UsageDisplay
                     );
                 }
                 if crate::scheduler::is_revoked_error(&e) {
-                    return Err(format!("TOKEN_INVALID:刷新 token 失败: {}", e));
+                    return Err(format!("TOKEN_INVALID:Token refresh failed: {}", e));
                 }
                 return Err(format!(
                     "TOKEN_REFRESH_TRANSIENT:刷新请求失败，暂未判定账号失效: {}",
@@ -3320,7 +3454,7 @@ async fn get_quota_internal(state: &AppState, id: String) -> Result<UsageDisplay
             }
         }
     } else {
-        return Err("TOKEN_INVALID:无 access_token 且无 refresh_token".to_string());
+        return Err("TOKEN_INVALID:No access_token or refresh_token is available.".to_string());
     };
 
     // client/solo 模式禁止 fetch_usage_direct 内部本地 rt 刷新（usage.rs:102）
@@ -3484,10 +3618,10 @@ async fn send_codex_invite(
         .filter(|e| seen.insert(e.to_lowercase()))
         .collect();
     if emails.is_empty() {
-        return Err("至少需要 1 个邀请邮箱".to_string());
+        return Err("Enter at least one invitee email address.".to_string());
     }
     if emails.len() > 50 {
-        return Err(format!("邀请邮箱过多：{} 个，最多 50 个", emails.len()));
+        return Err(format!("Too many invitee email addresses: {} provided; the maximum is 50.", emails.len()));
     }
 
     // 取该账号 token / account_id（逻辑与 get_quota_by_id 一致）
@@ -3496,9 +3630,9 @@ async fn send_codex_invite(
         let account = store
             .accounts
             .get(&id)
-            .ok_or_else(|| format!("账号 {} 不存在", id))?;
+            .ok_or_else(|| format!("Account {} not found", id))?;
         if !account.is_openai_account() {
-            return Err("PROVIDER_ACCOUNT:该 Provider 账号不支持 Codex 邀请".to_string());
+            return Err("PROVIDER_ACCOUNT:This provider account does not support Codex invitations.".to_string());
         }
         let at = AccountStore::extract_access_token(&account.auth_json);
         let aid = AccountStore::extract_account_id(&account.auth_json);
@@ -3532,10 +3666,10 @@ async fn send_codex_invite(
                 }
                 token_res.access_token
             }
-            Err(e) => return Err(format!("TOKEN_INVALID:刷新 token 失败: {}", e)),
+            Err(e) => return Err(format!("TOKEN_INVALID:Token refresh failed: {}", e)),
         }
     } else {
-        return Err("TOKEN_INVALID:无 access_token 且无 refresh_token".to_string());
+        return Err("TOKEN_INVALID:No access_token or refresh_token is available.".to_string());
     };
 
     usage::send_referral_invite(&access_token, account_id.as_deref(), &emails, None).await
@@ -3549,16 +3683,16 @@ async fn send_codex_wakeup(
     id: String,
     prompt: Option<String>,
 ) -> Result<usage::WakeupResult, String> {
-    let prompt = prompt.unwrap_or_else(|| "你好".to_string());
+    let prompt = prompt.unwrap_or_else(|| "Hello".to_string());
 
     let (access_token_opt, account_id, refresh_token, is_client_or_solo) = {
         let store = state.store.lock().map_err(|e| e.to_string())?;
         let account = store
             .accounts
             .get(&id)
-            .ok_or_else(|| format!("账号 {} 不存在", id))?;
+            .ok_or_else(|| format!("Account {} not found", id))?;
         if !account.is_chatgpt_oauth() {
-            return Err("UNSUPPORTED_ACCOUNT:仅 ChatGPT OAuth 订阅账号支持 Codex 唤醒".to_string());
+            return Err("UNSUPPORTED_ACCOUNT:Codex wake-up is only supported for ChatGPT OAuth subscription accounts.".to_string());
         }
         let at = AccountStore::extract_access_token(&account.auth_json);
         let aid = AccountStore::extract_account_id(&account.auth_json);
@@ -3592,10 +3726,10 @@ async fn send_codex_wakeup(
                 }
                 token_res.access_token
             }
-            Err(e) => return Err(format!("TOKEN_INVALID:刷新 token 失败: {}", e)),
+            Err(e) => return Err(format!("TOKEN_INVALID:Token refresh failed: {}", e)),
         }
     } else {
-        return Err("TOKEN_INVALID:无 access_token 且无 refresh_token".to_string());
+        return Err("TOKEN_INVALID:No access_token or refresh_token is available.".to_string());
     };
 
     usage::send_wakeup(
@@ -3621,7 +3755,7 @@ async fn resolve_account_access_token(
         let account = store
             .accounts
             .get(id)
-            .ok_or_else(|| format!("账号 {} 不存在", id))?;
+            .ok_or_else(|| format!("Account {} not found", id))?;
         if !account.is_openai_account() {
             return Err(relay_err.to_string());
         }
@@ -3657,10 +3791,10 @@ async fn resolve_account_access_token(
                 }
                 token_res.access_token
             }
-            Err(e) => return Err(format!("TOKEN_INVALID:刷新 token 失败: {}", e)),
+            Err(e) => return Err(format!("TOKEN_INVALID:Token refresh failed: {}", e)),
         }
     } else {
-        return Err("TOKEN_INVALID:无 access_token 且无 refresh_token".to_string());
+        return Err("TOKEN_INVALID:No access_token or refresh_token is available.".to_string());
     };
 
     Ok((access_token, account_id))
@@ -3693,85 +3827,144 @@ async fn consume_reset_credit(
     usage::consume_reset_credit(&access_token, account_id.as_deref()).await
 }
 
-/// 用指定账号在「隔离 CODEX_HOME + 直连 OpenAI」下打开一个交互式 codex 终端。
-///
-/// 用途：referral 兑现需要"真 codex CLI 的 turn"——手搓 API 不算数。这里给该号
-/// 单独建一个 CODEX_HOME（塞它自己的 auth.json + 默认 openai provider 直连，
-/// **不走 codex-switcher proxy**，避免被改写成激活账号），再开 Terminal 跑 codex，
-/// 你在里面发一句"你好"即可触发兑现（前提：该号已在网页完成 referral 接受）。
-///
-/// 注意：codex 启动会刷新并轮换 refresh_token，本号在 store/Server 里的副本会变旧。
-/// 薅 referral 不依赖回写（奖励照样到账），但该 free 号之后可能因 token 失步被吊销——
-/// 一次性号可不管。
+/// Launch Codex Desktop with the phone anchor on disk and the selected account
+/// as the proxy's active account.
 #[tauri::command]
-fn open_codex_terminal(state: State<AppState>, id: String) -> Result<String, String> {
-    let (auth_json, name) = {
-        let store = state.store.lock().map_err(|e| e.to_string())?;
-        let acc = store
-            .accounts
-            .get(&id)
-            .ok_or_else(|| format!("账号 {} 不存在", id))?;
-        if !acc.is_openai_account() {
-            return Err("PROVIDER_ACCOUNT:该 Provider 账号不支持 codex 终端".to_string());
+async fn open_codex_terminal(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<String, String> {
+    let proxy_running = state
+        .proxy_handle
+        .lock()
+        .map(|handle| handle.is_some())
+        .unwrap_or(false);
+    let name = {
+        let mut store = state.store.lock().map_err(|e| e.to_string())?;
+        let (name, is_openai, has_token) = {
+            let acc = store
+                .accounts
+                .get(&id)
+                .ok_or_else(|| format!("Account {} not found", id))?;
+            (
+                acc.name.clone(),
+                acc.is_openai_account(),
+                acc.auth_json
+                    .get("tokens")
+                    .and_then(|t| t.get("access_token"))
+                    .is_some(),
+            )
+        };
+        if !is_openai {
+            return Err("PROVIDER_ACCOUNT:This provider account does not support Codex Desktop.".to_string());
         }
-        (acc.auth_json.clone(), acc.name.clone())
+        if !has_token {
+            return Err("Account is missing Codex tokens and cannot be launched.".to_string());
+        }
+
+        if store
+            .session_anchor_id()
+            .is_some_and(|anchor_id| anchor_id != id)
+            && !(store.settings.proxy_enabled && proxy_running)
+        {
+            return Err(
+                "Start the local proxy before opening a secondary account with a phone anchor"
+                    .to_string(),
+            );
+        }
+
+        store.switch_to(&id, false)?;
+        // A prior direct launch may have put the secondary identity on disk.
+        // Restore the anchor before Desktop reloads it; keep current=secondary.
+        store.restore_disk_real_expiry_for_anchor()?;
+        store.save()?;
+        name
     };
+    let _ = app.emit("accounts-updated", ());
+    proxy::invalidate_remote_token_cache();
 
-    // auth_json 已是 codex 格式（{last_refresh, tokens:{...}}），补上 OPENAI_API_KEY: null
-    let mut auth = auth_json;
-    if !auth.is_object() {
-        return Err("账号 auth_json 结构异常".to_string());
-    }
-    if auth
-        .get("tokens")
-        .and_then(|t| t.get("access_token"))
-        .is_none()
+    // Keep Desktop on the proxy whenever it is actually running so a phone
+    // anchor can coexist with a different active account. Direct mode remains
+    // the fallback when the proxy is stopped.
+    let proxy_url = state.store.lock().ok().and_then(|store| {
+        (store.settings.proxy_enabled && proxy_running)
+            .then(|| format!("http://localhost:{}/v1", store.settings.proxy_port))
+    });
+    set_codex_config_base_url(proxy_url.as_deref())?;
+
+    restart_chatgpt_desktop().await?;
+
+    Ok(format!("Switched to {} and opened Codex Desktop", name))
+}
+
+/// Quit any running ChatGPT/Codex desktop process, then relaunch so it reloads
+/// `~/.codex/auth.json`. Without a restart, an already-open Desktop keeps the
+/// previous account.
+async fn restart_chatgpt_desktop() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
     {
-        return Err("账号缺少 codex tokens，无法启动".to_string());
+        for app_name in ["ChatGPT", "Codex"] {
+            let script = format!(
+                "tell application \"System Events\" to if exists process \"{}\" then tell application \"{}\" to quit",
+                app_name, app_name
+            );
+            let _ = Command::new("osascript").args(["-e", &script]).status();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+
+        let candidates = ["ChatGPT", "Codex"];
+        let mut last_err = String::from("ChatGPT/Codex.app not found");
+        for app_name in candidates {
+            match Command::new("open").args(["-a", app_name]).spawn() {
+                Ok(_) => return Ok(()),
+                Err(e) => last_err = format!("{}: {}", app_name, e),
+            }
+        }
+        return Err(format!("Failed to open Codex Desktop ({})", last_err));
     }
-    if let Some(obj) = auth.as_object_mut() {
-        obj.entry("OPENAI_API_KEY".to_string())
-            .or_insert(serde_json::Value::Null);
+
+    #[cfg(target_os = "linux")]
+    {
+        // Process name is "ChatGPT" (/usr/lib/chatgpt/ChatGPT).
+        let _ = Command::new("pkill").args(["-x", "ChatGPT"]).status();
+        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+
+        // Official package: /usr/bin/chatgpt → ../lib/chatgpt/codex-launcher
+        let candidates: &[(&str, &[&str])] = &[
+            ("chatgpt", &[]),
+            ("gtk-launch", &["chatgpt.desktop"]),
+            ("xdg-open", &["chatgpt://"]),
+        ];
+        let mut last_err = String::from("chatgpt desktop not found");
+        for (bin, args) in candidates {
+            let found = Command::new("which")
+                .arg(bin)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if !found {
+                continue;
+            }
+            let mut cmd = Command::new(bin);
+            cmd.args(*args);
+            cmd.env_remove("OPENAI_BASE_URL");
+            cmd.env_remove("CODEX_APP_SERVER_OPENAI_BASE_URL");
+            match cmd.spawn() {
+                Ok(_) => return Ok(()),
+                Err(e) => last_err = format!("{}: {}", bin, e),
+            }
+        }
+        return Err(format!(
+            "Failed to open Codex Desktop (install ChatGPT / chatgpt). Last error: {}",
+            last_err
+        ));
     }
 
-    // 隔离 CODEX_HOME：~/.codex-switcher/codex-launch/<id>/
-    let home = dirs::home_dir()
-        .ok_or("无法获取用户目录")?
-        .join(".codex-switcher")
-        .join("codex-launch")
-        .join(&id);
-    std::fs::create_dir_all(&home).map_err(|e| format!("创建 CODEX_HOME 失败: {}", e))?;
-    std::fs::write(
-        home.join("auth.json"),
-        serde_json::to_string(&auth).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| format!("写 auth.json 失败: {}", e))?;
-    // 默认 openai provider（直连 chatgpt.com），不设 model_provider = 不走 switcher proxy
-    let config = "model = \"gpt-5.5\"\nmodel_reasoning_effort = \"low\"\napproval_policy = \"never\"\nsandbox_mode = \"read-only\"\n";
-    std::fs::write(home.join("config.toml"), config)
-        .map_err(|e| format!("写 config.toml 失败: {}", e))?;
-
-    // 开 Terminal.app 跑 codex（登录 shell 有 PATH，能找到 codex）
-    let home_str = home
-        .to_string_lossy()
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"");
-    let inner = format!(
-        "export CODEX_HOME=\\\"{}\\\"; clear; echo '账号: {} — 在下面直接发一句 你好 即可触发 referral 兑现'; codex",
-        home_str,
-        name.replace('\'', "")
-    );
-    let script = format!(
-        "tell application \"Terminal\"\nactivate\ndo script \"{}\"\nend tell",
-        inner
-    );
-    Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .spawn()
-        .map_err(|e| format!("打开 Terminal 失败: {}", e))?;
-
-    Ok(format!("已为 {} 打开 codex 终端", name))
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        Err("open_codex_terminal is only supported on macOS and Linux".to_string())
+    }
 }
 
 /// 将当前 Codex auth.json 强制同步到指定账号
@@ -3783,7 +3976,7 @@ fn sync_current_auth_to_account(state: State<AppState>, id: String) -> Result<()
         store.save()?;
         return Ok(());
     }
-    Err("同步失败：账号不存在或 User ID 不匹配".to_string())
+    Err("Sync failed: account not found or user ID does not match.".to_string())
 }
 
 /// 检查 Codex 是否已登录
@@ -3804,7 +3997,7 @@ async fn get_quota_by_id(
         let store = state.store.lock().map_err(|e| e.to_string())?;
         if let Some(acc) = store.accounts.get(&id) {
             if !acc.is_openai_account() {
-                return Err("PROVIDER_ACCOUNT:该 Provider 账号不支持 OpenAI usage".to_string());
+                return Err("PROVIDER_ACCOUNT:This provider account does not support OpenAI usage.".to_string());
             }
         }
     }
@@ -3838,7 +4031,7 @@ async fn get_quota_by_id(
             let local_auth = store
                 .accounts
                 .get(&id)
-                .ok_or_else(|| format!("账号 {} 不存在", id))?
+                .ok_or_else(|| format!("Account {} not found", id))?
                 .auth_json
                 .clone();
 
@@ -3868,7 +4061,7 @@ async fn get_quota_by_id(
         let account = store
             .accounts
             .get(&id)
-            .ok_or_else(|| format!("账号 {} 不存在", id))?;
+            .ok_or_else(|| format!("Account {} not found", id))?;
 
         let at = AccountStore::extract_access_token(&account.auth_json);
         let aid = AccountStore::extract_account_id(&account.auth_json);
@@ -3908,10 +4101,10 @@ async fn get_quota_by_id(
                 }
                 token_res.access_token
             }
-            Err(e) => return Err(format!("TOKEN_INVALID:刷新 token 失败: {}", e)),
+            Err(e) => return Err(format!("TOKEN_INVALID:Token refresh failed: {}", e)),
         }
     } else {
-        return Err("TOKEN_INVALID:无 access_token 且无 refresh_token".to_string());
+        return Err("TOKEN_INVALID:No access_token or refresh_token is available.".to_string());
     };
 
     // 2. 使用 Token 获取用量（client/solo 模式同样禁止 usage.rs 内部本地 rt 刷新）
@@ -4843,7 +5036,7 @@ async fn delete_session_route(state: State<'_, AppState>, id: String) -> Result<
             .lock()
             .map_err(|e| format!("session_routes lock: {}", e))?;
         if !store.delete(&id) {
-            return Err(format!("session route 不存在: {}", id));
+            return Err(format!("Session route not found: {}", id));
         }
         store.save()?;
     }
@@ -4864,7 +5057,7 @@ async fn toggle_session_route(
             .lock()
             .map_err(|e| format!("session_routes lock: {}", e))?;
         if !store.toggle(&id, enabled) {
-            return Err(format!("session route 不存在: {}", id));
+            return Err(format!("Session route not found: {}", id));
         }
         store.save()?;
     }
@@ -4884,7 +5077,7 @@ async fn update_session_route_label(
         .lock()
         .map_err(|e| format!("session_routes lock: {}", e))?;
     if !store.update_label(&id, label) {
-        return Err(format!("session route 不存在: {}", id));
+        return Err(format!("Session route not found: {}", id));
     }
     store.save()?;
     // label 改名不影响路由匹配，不需要踢 WS
@@ -4935,7 +5128,7 @@ fn add_skill_repo(owner: String, name: String, branch: String) -> Result<(), Str
         .iter()
         .any(|r| r.owner == owner && r.name == name)
     {
-        return Err("仓库已存在".into());
+        return Err("Repository already exists.".into());
     }
     data.repos.push(skills::SkillRepo {
         owner,
@@ -5000,7 +5193,7 @@ fn get_skill_content(directory: String) -> Result<String, String> {
         .join("skills")
         .join(&directory);
     let md_path = ssot.join("SKILL.md");
-    std::fs::read_to_string(&md_path).map_err(|e| format!("读取失败: {}", e))
+    std::fs::read_to_string(&md_path).map_err(|e| format!("Read failed: {}", e))
 }
 
 #[tauri::command]
@@ -5058,22 +5251,25 @@ fn kill_codex_processes() -> Result<String, String> {
         .arg("-c")
         .arg(script)
         .output()
-        .map_err(|e| format!("执行失败: {}", e))?;
+        .map_err(|e| format!("Execution failed: {}", e))?;
 
     let count = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let n: i32 = count.parse().unwrap_or(0);
 
     if n > 0 {
-        Ok(format!("已终止 {} 个 codex 进程", n))
+        Ok(format!("Stopped {} Codex process(es).", n))
     } else {
         Ok("未找到运行中的 codex 进程".to_string())
     }
 }
 
-/// 设置 OPENAI_BASE_URL 环境变量（终端 + GUI 应用全覆盖）
+/// Set proxy routing for both the Codex CLI and Codex Desktop.
+/// Phone-anchor switching depends on Desktop requests entering the local proxy;
+/// otherwise Desktop reads the anchored `~/.codex/auth.json` directly and
+/// ignores `store.current`.
 #[tauri::command]
 fn set_proxy_env(port: u16, enable: bool) -> Result<String, String> {
-    let home = dirs::home_dir().ok_or("无法获取用户目录")?;
+    let home = dirs::home_dir().ok_or("Could not determine the user home directory")?;
     let env_value = format!("http://localhost:{}/v1", port);
     let env_line = format!("export OPENAI_BASE_URL={}", env_value);
     let marker = "# codex-switcher-proxy";
@@ -5086,13 +5282,24 @@ fn set_proxy_env(port: u16, enable: bool) -> Result<String, String> {
             continue;
         }
         let content = std::fs::read_to_string(&rc_path)
-            .map_err(|e| format!("读取 {} 失败: {}", rc_name, e))?;
+            .map_err(|e| format!("Failed to read {}: {}", rc_name, e))?;
 
         let cleaned: Vec<&str> = content
             .lines()
             .filter(|line| !line.contains(marker))
             .collect();
         let mut new_content = cleaned.join("\n");
+        // Drop a previously installed codex-proxy() function block if present.
+        if let Some(start) = new_content.find("\ncodex-proxy() {") {
+            if let Some(end_rel) = new_content[start..].find("\n}\n") {
+                let end = start + end_rel + 3;
+                new_content = format!("{}{}", &new_content[..start], &new_content[end..]);
+            }
+        } else if new_content.starts_with("codex-proxy() {") {
+            if let Some(end_rel) = new_content.find("\n}\n") {
+                new_content = new_content[end_rel + 3..].to_string();
+            }
+        }
 
         if enable {
             if !new_content.ends_with('\n') {
@@ -5102,7 +5309,7 @@ fn set_proxy_env(port: u16, enable: bool) -> Result<String, String> {
         }
 
         std::fs::write(&rc_path, &new_content)
-            .map_err(|e| format!("写入 {} 失败: {}", rc_name, e))?;
+            .map_err(|e| format!("Failed to write {}: {}", rc_name, e))?;
         results.push(rc_name.to_string());
     }
 
@@ -5125,12 +5332,16 @@ fn set_proxy_env(port: u16, enable: bool) -> Result<String, String> {
     // ── 3. Codex App config.toml：写入 openai_base_url ──
     match set_codex_config_base_url(if enable { Some(&env_value) } else { None }) {
         Ok(_) => results.push("config.toml".to_string()),
-        Err(e) => results.push(format!("config.toml(失败: {})", e)),
+        Err(e) => results.push(format!("config.toml (failed: {})", e)),
     }
 
-    let status = if enable { "已设置" } else { "已移除" };
+    let status = if enable {
+        "Proxy enabled for CLI + Desktop"
+    } else {
+        "Proxy removed; CLI + Desktop use direct mode"
+    };
     Ok(format!(
-        "{} OPENAI_BASE_URL ({})。\n终端：新窗口生效\nCodex App：重启后生效",
+        "{} ({})。\n终端：新窗口生效\nCodex App：重启后生效",
         status,
         results.join(", ")
     ))
@@ -5139,7 +5350,7 @@ fn set_proxy_env(port: u16, enable: bool) -> Result<String, String> {
 /// 读写 ~/.codex/config.toml 的 openai_base_url 字段
 fn set_codex_config_base_url(url: Option<&str>) -> Result<(), String> {
     let config_path = dirs::home_dir()
-        .ok_or("无法获取用户目录")?
+        .ok_or("Could not determine the user home directory")?
         .join(".codex")
         .join("config.toml");
 
@@ -5148,13 +5359,13 @@ fn set_codex_config_base_url(url: Option<&str>) -> Result<(), String> {
             // 文件不存在，创建并写入
             let content = format!("openai_base_url = \"{}\"\n", url.unwrap());
             std::fs::write(&config_path, content)
-                .map_err(|e| format!("创建 config.toml 失败: {}", e))?;
+                .map_err(|e| format!("Failed to create config.toml: {}", e))?;
         }
         return Ok(());
     }
 
     let content = std::fs::read_to_string(&config_path)
-        .map_err(|e| format!("读取 config.toml 失败: {}", e))?;
+        .map_err(|e| format!("Failed to read config.toml: {}", e))?;
 
     let mut new_lines: Vec<String> = Vec::new();
     let mut found = false;
@@ -5193,25 +5404,52 @@ fn set_codex_config_base_url(url: Option<&str>) -> Result<(), String> {
     }
 
     std::fs::write(&config_path, new_lines.join("\n") + "\n")
-        .map_err(|e| format!("写入 config.toml 失败: {}", e))?;
+        .map_err(|e| format!("Failed to write config.toml: {}", e))?;
 
     Ok(())
+}
+
+fn codex_desktop_proxy_configured(port: u16) -> bool {
+    let Some(path) = dirs::home_dir().map(|home| home.join(".codex/config.toml")) else {
+        return false;
+    };
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    codex_config_has_proxy_url(&content, port)
+}
+
+fn codex_config_has_proxy_url(content: &str, port: u16) -> bool {
+    content
+        .lines()
+        .take_while(|line| !line.trim_start().starts_with('['))
+        .any(|line| {
+            let value = line
+                .trim()
+                .strip_prefix("openai_base_url")
+                .and_then(|rest| rest.trim().strip_prefix('='));
+            value.is_some_and(|value| {
+                let value = value.trim().trim_matches('"');
+                value == format!("http://127.0.0.1:{port}/v1")
+                    || value == format!("http://localhost:{port}/v1")
+            })
+        })
 }
 
 /// 切换 Codex fast 模式（修改 config.toml 的 profile 字段）
 #[tauri::command]
 fn set_codex_fast_mode(enable: bool) -> Result<String, String> {
     let config_path = dirs::home_dir()
-        .ok_or("无法获取用户目录")?
+        .ok_or("Could not determine the user home directory")?
         .join(".codex")
         .join("config.toml");
 
     if !config_path.exists() {
-        return Err("~/.codex/config.toml 不存在".to_string());
+        return Err("~/.codex/config.toml does not exist.".to_string());
     }
 
     let content = std::fs::read_to_string(&config_path)
-        .map_err(|e| format!("读取 config.toml 失败: {}", e))?;
+        .map_err(|e| format!("Failed to read config.toml: {}", e))?;
 
     let mut new_lines: Vec<String> = Vec::new();
     let mut found_profile = false;
@@ -5236,12 +5474,12 @@ fn set_codex_fast_mode(enable: bool) -> Result<String, String> {
     }
 
     std::fs::write(&config_path, new_lines.join("\n") + "\n")
-        .map_err(|e| format!("写入 config.toml 失败: {}", e))?;
+        .map_err(|e| format!("Failed to write config.toml: {}", e))?;
 
     if enable {
-        Ok("Fast 模式已开启（2x 额度消耗，更快推理）。重启 Codex 生效。".to_string())
+        Ok("Fast mode enabled (2x quota usage for faster reasoning). Restart Codex to apply.".to_string())
     } else {
-        Ok("Fast 模式已关闭。重启 Codex 生效。".to_string())
+        Ok("Fast mode disabled. Restart Codex to apply.".to_string())
     }
 }
 
@@ -5249,13 +5487,13 @@ fn set_codex_fast_mode(enable: bool) -> Result<String, String> {
 #[tauri::command]
 fn set_codex_features_goals(enable: bool) -> Result<String, String> {
     let config_path = dirs::home_dir()
-        .ok_or("无法获取用户目录")?
+        .ok_or("Could not determine the user home directory")?
         .join(".codex")
         .join("config.toml");
 
     let content = if config_path.exists() {
         std::fs::read_to_string(&config_path)
-            .map_err(|e| format!("读取 config.toml 失败: {}", e))?
+            .map_err(|e| format!("Failed to read config.toml: {}", e))?
     } else {
         String::new()
     };
@@ -5305,12 +5543,12 @@ fn set_codex_features_goals(enable: bool) -> Result<String, String> {
     }
 
     std::fs::write(&config_path, new_lines.join("\n") + "\n")
-        .map_err(|e| format!("写入 config.toml 失败: {}", e))?;
+        .map_err(|e| format!("Failed to write config.toml: {}", e))?;
 
     Ok(if enable {
-        "[features] goals = true 已写入。重启 Codex 生效。".to_string()
+        "[features] goals = true written. Restart Codex to apply.".to_string()
     } else {
-        "[features] goals 已关闭。重启 Codex 生效。".to_string()
+        "[features] goals disabled. Restart Codex to apply.".to_string()
     })
 }
 
@@ -5318,7 +5556,7 @@ fn set_codex_features_goals(enable: bool) -> Result<String, String> {
 #[tauri::command]
 fn get_codex_features_goals() -> Result<bool, String> {
     let config_path = dirs::home_dir()
-        .ok_or("无法获取用户目录")?
+        .ok_or("Could not determine the user home directory")?
         .join(".codex")
         .join("config.toml");
 
@@ -5326,7 +5564,7 @@ fn get_codex_features_goals() -> Result<bool, String> {
         return Ok(false);
     }
 
-    let content = std::fs::read_to_string(&config_path).map_err(|e| format!("读取失败: {}", e))?;
+    let content = std::fs::read_to_string(&config_path).map_err(|e| format!("Read failed: {}", e))?;
     let mut in_features = false;
 
     for line in content.lines() {
@@ -5347,7 +5585,7 @@ fn get_codex_features_goals() -> Result<bool, String> {
 #[tauri::command]
 fn get_codex_fast_mode() -> Result<bool, String> {
     let config_path = dirs::home_dir()
-        .ok_or("无法获取用户目录")?
+        .ok_or("Could not determine the user home directory")?
         .join(".codex")
         .join("config.toml");
 
@@ -5355,7 +5593,7 @@ fn get_codex_fast_mode() -> Result<bool, String> {
         return Ok(false);
     }
 
-    let content = std::fs::read_to_string(&config_path).map_err(|e| format!("读取失败: {}", e))?;
+    let content = std::fs::read_to_string(&config_path).map_err(|e| format!("Read failed: {}", e))?;
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -5530,7 +5768,7 @@ fn sync_active_with_disk(state: State<AppState>, app: tauri::AppHandle) -> Resul
                 .find(|a| AccountStore::auth_identity_matches(&a.auth_json, &disk_auth))
                 .map(|a| a.id.clone())
         })
-        .ok_or_else(|| "磁盘账号不在管理列表中，请先导入".to_string())?;
+            .ok_or_else(|| "The disk account is not in the managed account list. Import it first.".to_string())?;
 
     // 安全：只改指针，不覆盖 Token。避免封号 Token 污染好号。
     store.current = Some(matching_id);
@@ -5561,10 +5799,10 @@ fn client_settings_snapshot_raw(
     if store.settings.remote_server_url.is_empty()
         && store.settings.remote_server_url_fallback.is_empty()
     {
-        return Err("未配置 Server 地址".to_string());
+        return Err("Server address is not configured.".to_string());
     }
     if store.settings.remote_shared_secret.is_empty() {
-        return Err("未配置共享密钥".to_string());
+        return Err("Shared secret is not configured.".to_string());
     }
     Ok((
         store.settings.remote_server_url.clone(),
@@ -5619,7 +5857,7 @@ async fn remote_push_account(
             .into_iter()
             .find(|a| a.id == id)
             .cloned()
-            .ok_or_else(|| format!("本地未找到账号 {}", id))?
+            .ok_or_else(|| format!("Account not found locally: {}", id))?
     };
     let outcome = remote_client::upsert_account(&url, &secret, &account).await?;
     // 若 Server 按邮箱+身份合并到了旧 id，本机也把这个账号的 id 改过去，避免下次推又走 merged 分支
@@ -5753,7 +5991,7 @@ async fn remote_pull_all_tokens(
                     cid
                 );
             } else if let Err(e) = account::AccountStore::write_codex_auth(&auth) {
-                errors.push((cid.clone(), format!("写 auth.json 失败: {}", e)));
+                errors.push((cid.clone(), format!("Failed to write auth.json: {}", e)));
             } else {
                 wrote_auth_json = true;
                 if let Ok(mut store) = state.store.lock() {
@@ -5877,7 +6115,7 @@ async fn remote_sync_skills(state: State<'_, AppState>) -> Result<SkillSyncRepor
             let name = name.clone();
             tokio::task::spawn_blocking(move || skills::zip_skill_dir(&name))
                 .await
-                .map_err(|e| format!("zip task 崩溃: {}", e))?
+                .map_err(|e| format!("ZIP task panicked: {}", e))?
         };
         let bytes = match zip_result {
             Ok(b) => b,
@@ -5929,10 +6167,10 @@ fn remote_restart_server(state: State<AppState>, app: tauri::AppHandle) -> Resul
         }
     }
     if mode != "server" {
-        return Ok(format!("已停止（当前模式 {}）", mode));
+        return Ok(format!("Stopped (current mode: {}).", mode));
     }
     if secret.is_empty() {
-        return Err("共享密钥为空，请先生成".to_string());
+        return Err("Shared secret is empty. Generate one first.".to_string());
     }
     let port = effective_remote_server_port(port);
     let handle = remote_server::spawn_remote_server(
@@ -5948,7 +6186,7 @@ fn remote_restart_server(state: State<AppState>, app: tauri::AppHandle) -> Resul
         .lock()
         .map_err(|e| e.to_string())?;
     *slot = Some(handle);
-    Ok(format!("已启动 http://{}:{}", bind, port))
+    Ok(format!("Started at http://{}:{}", bind, port))
 }
 
 // ==================== end Remote Mode commands ====================
@@ -6036,6 +6274,9 @@ pub fn run() {
             // 初始化系统托盘
             if let Err(e) = tray::init(app.handle()) {
                 eprintln!("初始化托盘失败: {:?}", e);
+            }
+            if let Err(e) = tray::show_quota_overlay(app.handle()) {
+                eprintln!("[Quota] Floating widget unavailable: {e}");
             }
 
             // 启动后台调度器（仅在设置开启时）
@@ -6284,6 +6525,7 @@ pub fn run() {
             sync_current_auth_to_account,
             delete_account,
             update_account,
+            set_quota_widget_identity,
             set_account_window_priming,
             update_relay_usage_cookie,
             set_account_inactive_refresh_enabled,
@@ -6319,7 +6561,9 @@ pub fn run() {
             reload_ide_windows,
             get_settings,
             update_settings,
+            disable_switcher_routing,
             get_proxy_status,
+            toggle_quota_overlay,
             kill_codex_processes,
             set_proxy_env,
             get_token_stats,
@@ -6407,6 +6651,26 @@ mod tests {
     use super::*;
     use chrono::Utc;
 
+    #[test]
+    fn desktop_proxy_config_must_be_top_level_and_match_port() {
+        assert!(codex_config_has_proxy_url(
+            "openai_base_url = \"http://localhost:18080/v1\"\n[features]\n",
+            18080
+        ));
+        assert!(codex_config_has_proxy_url(
+            "openai_base_url = \"http://127.0.0.1:18080/v1\"\n",
+            18080
+        ));
+        assert!(!codex_config_has_proxy_url(
+            "[features]\nopenai_base_url = \"http://localhost:18080/v1\"\n",
+            18080
+        ));
+        assert!(!codex_config_has_proxy_url(
+            "openai_base_url = \"http://localhost:18081/v1\"\n",
+            18080
+        ));
+    }
+
     fn test_auth(account_id: &str, refresh_token: &str) -> serde_json::Value {
         serde_json::json!({
             "tokens": {
@@ -6444,6 +6708,8 @@ mod tests {
             relay_protocol: None,
             relay_category: None,
             is_session_anchor: false,
+            widget_number: None,
+            widget_emoji: None,
         }
     }
 
@@ -6791,7 +7057,7 @@ mod tests {
         let err = state
             .consume_quarantine_fix_ticket("expired")
             .expect_err("expired ticket should be rejected");
-        assert!(err.contains("过期"));
+        assert!(err.contains("expired"));
     }
 
     #[test]

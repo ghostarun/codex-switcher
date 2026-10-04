@@ -52,70 +52,90 @@
 
 /* 原生配色 — 同步自 Antigravity-Manager-main (DaisyUI dark) */
 .app[data-palette='midnight'] {
-  --bg-primary: #334155;
-  /* base-300  Slate-700  Layout/Navbar */
-  --bg-secondary: #334155;
-  /* base-300  页眉同色 */
+  --bg-primary: #1e293b;
+  /* darker slate layout */
+  --bg-secondary: #0f172a;
   --card-bg: #0f172a;
-  /* base-100  Slate-900  卡片/内容区 */
-  --border-color: #1e293b;
-  /* base-200  Slate-800 */
+  --border-color: #334155;
 
-  --text-primary: #e2e8f0;
-  /* Slate-200 */
-  --text-secondary: #94a3b8;
-  /* Slate-400 */
-  --text-muted: #64748b;
-  /* Slate-500 */
+  --text-primary: #f1f5f9;
+  /* brighter for readability */
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
 
-  --primary-color: #3b82f6;
-  /* Blue-500  主按钮 */
-  --primary-hover: #2563eb;
-  /* Blue-600 */
-  --success-color: #10b981;
-  /* Emerald-500 */
-  --warning-color: #f59e0b;
-  /* Amber-500 */
-  --danger-color: #ef4444;
-  /* Red-500 */
-  --accent-color: #10b981;
-  /* Emerald-500  DaisyUI accent */
-  --purple-color: #8b5cf6;
-  /* Violet-500 */
+  --primary-color: #60a5fa;
+  --primary-hover: #3b82f6;
+  --success-color: #34d399;
+  --warning-color: #fbbf24;
+  --danger-color: #f87171;
+  --accent-color: #34d399;
+  --purple-color: #a78bfa;
 
-  --input-bg: #0f172a;
-  --input-border: #1e293b;
+  --input-bg: #020617;
+  --input-border: #334155;
   --section-bg: #1e293b;
-  --hover-bg: rgba(59, 130, 246, 0.1);
-  --badge-bg: rgba(59, 130, 246, 0.15);
+  --hover-bg: rgba(96, 165, 250, 0.12);
+  --badge-bg: rgba(96, 165, 250, 0.18);
 
-  /* 按钮文字颜色 */
   --btn-text-on-primary: #ffffff;
+  color-scheme: dark;
 }
 
-[data-theme='dark'] {
-  --bg-primary: #0d1117;
-  --bg-secondary: #161b22;
-  --card-bg: #1c2128;
-  --border-color: #30363d;
+/* Black / dark-grey — high-contrast dark mode */
+.app[data-palette='obsidian'] {
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #111111;
+  --card-bg: #171717;
+  --border-color: #2e2e2e;
 
-  --text-primary: #e6edf3;
-  --text-secondary: #8b949e;
-  --text-muted: #6e7681;
+  --text-primary: #f5f5f5;
+  --text-secondary: #d4d4d4;
+  --text-muted: #a3a3a3;
 
-  --primary-color: #58a6ff;
-  --primary-hover: #4c9aff;
-  --success-color: #3fb950;
-  --warning-color: #d29922;
-  --danger-color: #f85149;
-  --accent-color: #238636;
-  --purple-color: #a371f7;
+  --primary-color: #6cb6ff;
+  --primary-hover: #4da3ff;
+  --success-color: #4ade80;
+  --warning-color: #fbbf24;
+  --danger-color: #fb7185;
+  --accent-color: #4ade80;
+  --purple-color: #c084fc;
 
-  --input-bg: rgba(255, 255, 255, 0.05);
-  --input-border: rgba(255, 255, 255, 0.1);
-  --section-bg: rgba(255, 255, 255, 0.03);
-  --hover-bg: rgba(255, 255, 255, 0.05);
-  --badge-bg: rgba(255, 255, 255, 0.1);
+  --input-bg: #0f0f0f;
+  --input-border: #3a3a3a;
+  --section-bg: #141414;
+  --hover-bg: rgba(255, 255, 255, 0.08);
+  --badge-bg: rgba(255, 255, 255, 0.12);
+
+  --btn-text-on-primary: #0a0a0a;
+  color-scheme: dark;
+}
+
+/* Legacy alias: [data-theme=dark] maps to the same black theme tokens */
+[data-theme='dark'],
+.app[data-theme='dark'] {
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #111111;
+  --card-bg: #171717;
+  --border-color: #2e2e2e;
+
+  --text-primary: #f5f5f5;
+  --text-secondary: #d4d4d4;
+  --text-muted: #a3a3a3;
+
+  --primary-color: #6cb6ff;
+  --primary-hover: #4da3ff;
+  --success-color: #4ade80;
+  --warning-color: #fbbf24;
+  --danger-color: #fb7185;
+  --accent-color: #4ade80;
+  --purple-color: #c084fc;
+
+  --input-bg: #0f0f0f;
+  --input-border: #3a3a3a;
+  --section-bg: #141414;
+  --hover-bg: rgba(255, 255, 255, 0.08);
+  --badge-bg: rgba(255, 255, 255, 0.12);
+  color-scheme: dark;
 }
 
 /* 玛瑙绿配色覆盖 (深色) */
@@ -159,6 +179,16 @@ body {
   padding: 16px 24px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
+}
+
+.quota-widget-toggle {
+  padding: 5px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--card-bg);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
 }
 
 .header-left {
@@ -680,4 +710,9 @@ body {
   font-size: 14px;
   color: var(--text-secondary);
   max-width: 320px;
+}
+.desktop-quota-indicator {
+  padding: 8px 14px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
 }

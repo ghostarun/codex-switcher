@@ -59,14 +59,14 @@ pub fn import_chatgpt_session(
 
     let trimmed = session_json.trim();
     if trimmed.is_empty() {
-        return Err("session JSON 不能为空".to_string());
+        return Err("Session JSON cannot be empty.".to_string());
     }
     let parsed: Value =
-        serde_json::from_str(trimmed).map_err(|e| format!("JSON 解析失败: {}", e))?;
+        serde_json::from_str(trimmed).map_err(|e| format!("JSON parsing failed: {}", e))?;
 
     let sessions = collect_session_like(&parsed);
     if sessions.is_empty() {
-        return Err("未找到包含 accessToken 的 session 对象".to_string());
+        return Err("No session object containing accessToken was found.".to_string());
     }
 
     let mut ok = Vec::new();
@@ -293,7 +293,7 @@ fn convert_one(record: &Value) -> Result<(Value, ImportedSessionInfo, String), S
     let access_token = first_non_empty_str(record, &["accessToken", "access_token"])
         .or_else(|| nested_str(record, "token", &["accessToken", "access_token"]))
         .or_else(|| nested_str(record, "credentials", &["accessToken", "access_token"]))
-        .ok_or_else(|| "缺少 accessToken".to_string())?;
+        .ok_or_else(|| "Missing accessToken".to_string())?;
 
     let session_token = first_non_empty_str(record, &["sessionToken", "session_token"])
         .or_else(|| nested_str(record, "token", &["sessionToken", "session_token"]))

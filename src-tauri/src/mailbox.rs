@@ -79,7 +79,7 @@ impl UsmailMyId {
         );
         loop {
             if Instant::now() >= deadline {
-                return Err("OTP 等待超时".into());
+                return Err("Timed out waiting for the OTP".into());
             }
             let resp = match self
                 .client
@@ -411,11 +411,11 @@ impl NissanSerena {
             )
             .send()
             .await
-            .map_err(|e| format!("nissanserena GET 失败: {e}"))?;
+            .map_err(|e| format!("nissanserena GET failed: {e}"))?;
         let html = resp
             .text()
             .await
-            .map_err(|e| format!("nissanserena 读响应失败: {e}"))?;
+            .map_err(|e| format!("Failed to read nissanserena response: {e}"))?;
 
         // 服务端按 newest→oldest 渲染。第一个 tracking-widest 块就是最新。
         let re_code = Regex::new(r#"tracking-widest">\s*(\d{6})"#).unwrap();

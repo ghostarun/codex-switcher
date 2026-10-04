@@ -61,7 +61,7 @@ pub async fn start_oauth_login(
         .await
         .map_err(|e| {
             format!(
-                "无法绑定本地端口 {}: {}。请关闭占用该端口的进程后重试。",
+                "Could not bind local port {}: {}. Close the process using this port and try again.",
                 DEFAULT_PORT, e
             )
         })?;
@@ -88,7 +88,7 @@ pub async fn start_oauth_login(
     {
         let mut pending = get_pending_login()
             .lock()
-            .map_err(|_| "登录流程状态锁异常")?;
+            .map_err(|_| "Login flow state lock is unavailable")?;
         *pending = Some(PendingLogin {
             pkce: pkce.clone(),
             port,
@@ -165,7 +165,7 @@ async fn handle_callback(listener: TcpListener, app_handle: AppHandle, expected_
             return;
         }
 
-        let response = "HTTP/1.1 400 Bad Request\r\n\r\n授权失败: State 校验不通过或参数缺失";
+        let response = "HTTP/1.1 400 Bad Request\r\n\r\nAuthorization failed: state validation failed or a parameter is missing.";
         let _ = socket.write_all(response.as_bytes()).await;
     }
 }
@@ -199,14 +199,14 @@ fn extract_oauth_code_from_request(request: &str, expected_state: &str) -> Optio
 pub async fn submit_oauth_callback(app_handle: AppHandle, input: String) -> Result<(), String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        return Err("回调链接不能为空".to_string());
+        return Err("Callback URL cannot be empty.".to_string());
     }
 
     // 尝试按 URL 解析；失败则按 query 串处理；都失败就当作裸 code
     let (code_opt, state_opt) = parse_callback_input(trimmed);
 
     let Some(code) = code_opt else {
-        return Err("未能从输入中解析出 code 参数".to_string());
+        return Err("Could not find the code parameter in the input.".to_string());
     };
 
     // 有 state 就校验；没 state 的裸 code 也接受（用户自己承担风险）
@@ -214,15 +214,15 @@ pub async fn submit_oauth_callback(app_handle: AppHandle, input: String) -> Resu
         let expected = {
             let guard = get_pending_login()
                 .lock()
-                .map_err(|_| "登录流程状态锁异常")?;
+                .map_err(|_| "Login flow state lock is unavailable")?;
             guard.as_ref().map(|p| p.state.clone())
         };
         match expected {
             Some(expected) if expected != *provided_state => {
-                return Err("state 校验不通过：这个回调链接不属于本次登录流程".to_string());
+                return Err("State validation failed: this callback URL does not belong to the current login flow.".to_string());
             }
             None => {
-                return Err("登录流程已过期或未启动，请先点击『立即登录 OpenAI』".to_string());
+                return Err("Login flow expired or was not started. Click Sign in to OpenAI first.".to_string());
             }
             _ => {}
         }
@@ -238,7 +238,7 @@ pub async fn submit_oauth_callback(app_handle: AppHandle, input: String) -> Resu
     // 走跟 HTTP 监听完全相同的路径：把 code 丢到前端
     app_handle
         .emit("oauth-callback-received", code)
-        .map_err(|e| format!("派发 oauth-callback-received 失败: {}", e))?;
+        .map_err(|e| format!("Failed to dispatch oauth-callback-received: {}", e))?;
     Ok(())
 }
 
@@ -279,23 +279,23 @@ pub async fn copy_to_clipboard(text: String) -> Result<(), String> {
     let mut child = Command::new("pbcopy")
         .stdin(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("无法启动 pbcopy: {}", e))?;
+        .map_err(|e| format!("Could not start pbcopy: {}", e))?;
 
     {
         let stdin = child
             .stdin
             .as_mut()
-            .ok_or_else(|| "pbcopy stdin 不可写".to_string())?;
+            .ok_or_else(|| "Could not write to pbcopy stdin".to_string())?;
         stdin
             .write_all(text.as_bytes())
-            .map_err(|e| format!("写入 pbcopy 失败: {}", e))?;
+            .map_err(|e| format!("Failed to write to pbcopy: {}", e))?;
     }
 
     let status = child
         .wait()
-        .map_err(|e| format!("等待 pbcopy 退出失败: {}", e))?;
+        .map_err(|e| format!("Failed while waiting for pbcopy to exit: {}", e))?;
     if !status.success() {
-        return Err(format!("pbcopy 返回非零: {:?}", status.code()));
+        return Err(format!("pbcopy exited with a non-zero status: {:?}", status.code()));
     }
     Ok(())
 }
@@ -305,8 +305,8 @@ pub async fn copy_to_clipboard(text: String) -> Result<(), String> {
 pub async fn complete_oauth_login(code: String) -> Result<oauth::TokenResponse, String> {
     // 提取所需数据并立即释放锁，避免跨 await 持有 MutexGuard
     let (code_verifier, port) = {
-        let mut pending_lock = get_pending_login().lock().map_err(|_| "锁被污染")?;
-        let pending = pending_lock.take().ok_or("登录流程已过期或未启动")?;
+        let mut pending_lock = get_pending_login().lock().map_err(|_| "Login state lock is poisoned")?;
+        let pending = pending_lock.take().ok_or("Login flow expired or was not started")?;
         (pending.pkce.code_verifier, pending.port)
     };
 

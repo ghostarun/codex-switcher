@@ -46,6 +46,7 @@ export interface AppSettings {
     refresh_interval_minutes: number;
     inactive_refresh_days: number;
     theme_palette: string;
+    quota_widget_identity?: 'number' | 'emoji';
     remote_mode?: string;
     relay_auto_switch_out?: boolean;
     relay_auto_switch_in?: boolean;
@@ -97,9 +98,9 @@ export interface Account {
     created_at: string;
     last_used: string | null;
     notes: string | null;
-    /** 用户手工维护的账号/订阅到期日（YYYY-MM-DD），不是 access token 到期时间。 */
+    /** User-maintained account/subscription expiry (YYYY-MM-DD), not access token expiry. */
     account_expires_at?: string | null;
-    /** 窗口 reset 后用该账号发一次最小 Codex 请求，主动开始新的滚动倒计时。 */
+    /** After window reset, one minimal Codex request per account to restart rolling countdown. */
     window_priming?: WindowPrimingState;
     cached_quota: CachedQuota | null;
     keepalive: KeepaliveState;
@@ -115,14 +116,15 @@ export interface Account {
     relay_model_map?: Record<string, string> | null;
     relay_model_fallback?: string | null;
     relay_protocol?: string | null;
-    /** 业务分类：aggregator (中转) / coding_plan / third_party (API) */
+    /** Category: aggregator (relay) / coding_plan / third_party (API) */
     relay_category?: 'aggregator' | 'coding_plan' | 'third_party' | null;
-    /** 手机锚（Codex.app 手机远程连接绑定）。整个 store 强约束最多一个 true。 */
+    /** Phone anchor (Codex.app remote bind). At most one true in the store. */
     is_session_anchor?: boolean;
+    widget_number?: number | null;
+    widget_emoji?: string | null;
 }
 
-/** 解析有效 kind：与 Rust 端 `Account::effective_kind()` 行为一致
- *  (Legacy 时按 auth_json 里的 access_token 前缀派生) */
+/** Resolve effective kind; matches Rust `Account::effective_kind()` (legacy: from access_token prefix). */
 export function effectiveKind(account: Account): Exclude<AccountKind, 'legacy'> {
     if (account.kind && account.kind !== 'legacy') return account.kind;
     const auth = account.auth_json as { tokens?: { access_token?: string }; access_token?: string } | null;
@@ -141,12 +143,13 @@ export function useAccounts() {
         background_refresh: false,
         refresh_interval_minutes: 30,
         inactive_refresh_days: 7,
-        theme_palette: 'midnight',
+        theme_palette: 'obsidian',
+        quota_widget_identity: 'number',
     });
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    // 加载账号和设置
+    // Load accounts and settings
     const loadData = useCallback(async () => {
         try {
             setError(null);
@@ -167,7 +170,7 @@ export function useAccounts() {
         }
     }, []);
 
-    // 初始加载
+    // Initial load
     useEffect(() => {
         loadData();
     }, [loadData]);
@@ -183,7 +186,7 @@ export function useAccounts() {
         }
     }, [loadData]);
 
-    // 设置 / 取消 手机锚（互斥：整个 store 最多一个 anchor）
+    // Set / clear phone anchor (mutually exclusive)
     const setSessionAnchor = useCallback(async (id: string, enabled: boolean) => {
         try {
             setError(null);
@@ -195,7 +198,7 @@ export function useAccounts() {
         }
     }, [loadData]);
 
-    // 更新设置
+    // Update settings
     const updateSettings = useCallback(async (newSettings: AppSettings) => {
         try {
             setError(null);
@@ -207,9 +210,9 @@ export function useAccounts() {
         }
     }, []);
 
-    // ... 其他方法保持不变，但使用 loadData 替换 loadAccounts ...
+    // Other methods use loadData instead of loadAccounts
 
-    // 导入当前账号
+    // Import current account
     const importCurrent = useCallback(async (name: string, notes?: string) => {
         try {
             setError(null);
@@ -221,7 +224,7 @@ export function useAccounts() {
         }
     }, [loadData]);
 
-    // 切换账号
+    // Switch account
     const switchTo = useCallback(async (id: string) => {
         try {
             setError(null);
@@ -233,9 +236,7 @@ export function useAccounts() {
         }
     }, [loadData]);
 
-    // 删除账号
-    // 注意：不在这里做 confirm —— 上层 UI (AccountList ConfirmModal / AccountCard 二次点击)
-    // 已经承担确认职责；这里再弹 window.confirm 会变成双弹框。
+    // Delete account (confirm in AccountList UI only — no double confirm)
     const deleteAccount = useCallback(async (id: string) => {
         try {
             setError(null);
@@ -250,7 +251,7 @@ export function useAccounts() {
         }
     }, [loadData, currentId]);
 
-    // 更新账号
+    // Update account
     const updateAccount = useCallback(async (
         id: string,
         name?: string,
@@ -267,7 +268,7 @@ export function useAccounts() {
         }
     }, [loadData]);
 
-    // 导出
+    // Export
     const exportAccounts = useCallback(async () => {
         try {
             return await invoke<string>('export_accounts');
@@ -277,7 +278,7 @@ export function useAccounts() {
         }
     }, []);
 
-    // 导入
+    // Import
     const importAccounts = useCallback(async (json: string) => {
         try {
             setError(null);
@@ -289,7 +290,7 @@ export function useAccounts() {
         }
     }, [loadData]);
 
-    // 检查 Codex 登录状态
+    // Check Codex login state
     const checkCodexLogin = useCallback(async () => {
         try {
             return await invoke<boolean>('check_codex_login');
@@ -298,7 +299,7 @@ export function useAccounts() {
         }
     }, []);
 
-    // 开始 OAuth 登录；openBrowser=false 时只准备 URL + 启动监听，不打开默认浏览器
+    // Start OAuth; openBrowser=false prepares URL + listener without opening browser
     const startOAuthLogin = useCallback(async (openBrowser: boolean = true) => {
         try {
             setError(null);
@@ -309,7 +310,7 @@ export function useAccounts() {
         }
     }, []);
 
-    // 完成 OAuth 登录
+    // Finalize OAuth login
     const finalizeOAuthLogin = useCallback(async (code: string) => {
         try {
             setError(null);
@@ -322,7 +323,7 @@ export function useAccounts() {
         }
     }, [loadData]);
 
-    // 重载 IDE 窗口
+    // Reload IDE windows
     const reloadIdeWindows = useCallback(async (useWindowReload: boolean = false) => {
         try {
             setError(null);

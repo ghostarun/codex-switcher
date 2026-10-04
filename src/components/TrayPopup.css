@@ -23,7 +23,12 @@ body.is-tray-popup,
     user-select: none;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
+}
+
+.tray-popup > .quota-overlay.embedded {
+    align-self: center;
+    flex: 0 0 auto;
 }
 
 /* ===== Header ===== */

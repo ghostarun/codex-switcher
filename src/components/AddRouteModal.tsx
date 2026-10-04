@@ -24,17 +24,17 @@ type SourceMode = 'recent' | 'manual';
 
 function categoryBadge(account: Account): { label: string; className: string } {
     const kind = effectiveKind(account);
-    if (kind === 'chatgpt_oauth') return { label: '订阅', className: 'cs-rbadge cs-rbadge--sub' };
+    if (kind === 'chatgpt_oauth') return { label: 'Subscription', className: 'cs-rbadge cs-rbadge--sub' };
     if (kind === 'openai_key') return { label: 'API', className: 'cs-rbadge cs-rbadge--mono' };
     // relay → use relay_category
     switch (account.relay_category) {
         case 'coding_plan':
             return { label: 'Plan', className: 'cs-rbadge cs-rbadge--sub' };
         case 'third_party':
-            return { label: '三方', className: 'cs-rbadge cs-rbadge--mono' };
+            return { label: 'Third-party', className: 'cs-rbadge cs-rbadge--mono' };
         case 'aggregator':
         default:
-            return { label: '中转', className: 'cs-rbadge cs-rbadge--mono' };
+            return { label: 'Relay', className: 'cs-rbadge cs-rbadge--mono' };
     }
 }
 
@@ -50,7 +50,7 @@ function accountQuotaSummary(account: Account): string {
         const c = account.relay_usage_cache;
         if (c && c.is_active) {
             // Show unit as-is; backend uses "USD" / "tokens" / etc.
-            return `余额 ${c.remaining.toFixed(2)} ${c.unit}`;
+            return `Balance ${c.remaining.toFixed(2)} ${c.unit}`;
         }
         return '';
     }
@@ -59,7 +59,7 @@ function accountQuotaSummary(account: Account): string {
     // five_hour_left / weekly_left are integer percentages 0..100 in the cached
     // shape we get from useAccounts (legacy behavior — same as Dashboard).
     const fh = Number.isFinite(q.five_hour_left) ? `5h ${q.five_hour_left}%` : '';
-    const wk = Number.isFinite(q.weekly_left) ? `周 ${q.weekly_left}%` : '';
+    const wk = Number.isFinite(q.weekly_left) ? `Week ${q.weekly_left}%` : '';
     return [fh, wk].filter(Boolean).join(' · ');
 }
 
@@ -77,7 +77,7 @@ export function AddRouteModal({ isOpen, accounts, onClose, onSuccess }: AddRoute
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
     const [manualSessionId, setManualSessionId] = useState('');
 
-    // 5 分钟内被写过的最新 rollout —— 也就是用户"当前正在跟 codex 聊"的那个会话
+    // Latest rollout written in last 5 min = active codex session
     const [activeSession, setActiveSession] = useState<CodexSession | null>(null);
 
     // Account picker
@@ -109,8 +109,8 @@ export function AddRouteModal({ isOpen, accounts, onClose, onSuccess }: AddRoute
         }
     }, [isOpen]);
 
-    // Modal 打开时，检测"当前活跃 codex 会话"（5 分钟内被写过的最新 rollout）
-    // 用户点 "🎯 使用当前会话" 一键填入，免去手动复制 session_id 的麻烦。
+    // On open, detect active codex session (rollout in last 5 min)
+    // Use current session fills session_id without manual copy.
     useEffect(() => {
         if (!isOpen) return;
         let cancelled = false;
@@ -119,7 +119,7 @@ export function AddRouteModal({ isOpen, accounts, onClose, onSuccess }: AddRoute
                 if (!cancelled) setActiveSession(s);
             })
             .catch(() => {
-                /* 没检测到当前活跃会话不是错误，安静地忽略 */
+                /* No active session is OK — ignore */
             });
         return () => {
             cancelled = true;
@@ -213,20 +213,20 @@ export function AddRouteModal({ isOpen, accounts, onClose, onSuccess }: AddRoute
                 <div className="cs-relay-modal__header">
                     <div className="cs-relay-modal__title">
                         <div className="cs-relay-modal__icon">↦</div>
-                        <h2>添加路由</h2>
-                        <span className="cs-relay-modal__sub">把会话钉到账号</span>
+                        <h2>AddRoutes</h2>
+                        <span className="cs-relay-modal__sub">Pin session to account</span>
                     </div>
                     <button className="cs-relay-modal__close" onClick={onClose}>×</button>
                 </div>
 
                 <div className="cs-relay-modal__body">
                     <div className="cs-route-modal__body-grid">
-                        {/* Step 1: 选择会话 */}
+                        {/* Step 1: pick session */}
                         <div className="cs-route-section">
                             <div className="cs-route-section__head">
                                 <div className="cs-route-section__title">
                                     <span className="cs-route-section__num">1</span>
-                                    选择会话
+                                    Choose session
                                 </div>
                                 <div className="cs-route-toggle">
                                     <button
@@ -234,14 +234,14 @@ export function AddRouteModal({ isOpen, accounts, onClose, onSuccess }: AddRoute
                                         className={`cs-route-toggle__btn${sourceMode === 'recent' ? ' cs-route-toggle__btn--active' : ''}`}
                                         onClick={() => setSourceMode('recent')}
                                     >
-                                        从最近会话挑选
+                                        From recent sessions
                                     </button>
                                     <button
                                         type="button"
                                         className={`cs-route-toggle__btn${sourceMode === 'manual' ? ' cs-route-toggle__btn--active' : ''}`}
                                         onClick={() => setSourceMode('manual')}
                                     >
-                                        手动输入 ID
+                                        Enter ID manually
                                     </button>
                                 </div>
                             </div>
@@ -258,13 +258,13 @@ export function AddRouteModal({ isOpen, accounts, onClose, onSuccess }: AddRoute
                                 >
                                     <span className="cs-route-active-banner__icon">●</span>
                                     <span className="cs-route-active-banner__label">
-                                        当前活跃会话{activeSession.cwd ? `（${basename(activeSession.cwd) || activeSession.cwd}）` : ''}
+                                        Active session{activeSession.cwd ? ` (${basename(activeSession.cwd) || activeSession.cwd})` : ''}
                                     </span>
                                     <span className="cs-route-active-banner__sid">
                                         {shortSessionId(activeSession.session_id)}
                                     </span>
                                     <span className="cs-route-active-banner__cta">
-                                        {selectedSessionId === activeSession.session_id ? '✓ 已选' : '一键使用 →'}
+                                        {selectedSessionId === activeSession.session_id ? '✓ Selected' : 'Use now →'}
                                     </span>
                                 </button>
                             )}
@@ -274,7 +274,7 @@ export function AddRouteModal({ isOpen, accounts, onClose, onSuccess }: AddRoute
                                     <div className="cs-route-filter-row">
                                         <input
                                             className="cs-rinput"
-                                            placeholder="搜索 cwd / 首条消息…"
+                                            placeholder="Search cwd / first message…"
                                             value={sessionSearch}
                                             onChange={(e) => setSessionSearch(e.target.value)}
                                         />
@@ -283,7 +283,7 @@ export function AddRouteModal({ isOpen, accounts, onClose, onSuccess }: AddRoute
                                             value={cwdFilter}
                                             onChange={(e) => setCwdFilter(e.target.value)}
                                         >
-                                            <option value="">全部项目</option>
+                                            <option value="">All projects</option>
                                             {cwdOptions.map((c) => (
                                                 <option key={c} value={c}>{basename(c) || c}</option>
                                             ))}
@@ -291,12 +291,12 @@ export function AddRouteModal({ isOpen, accounts, onClose, onSuccess }: AddRoute
                                     </div>
 
                                     {sessionsLoading ? (
-                                        <div className="cs-route-loading">加载最近会话…</div>
+                                        <div className="cs-route-loading">Loading recent sessions…</div>
                                     ) : sessionsError ? (
                                         <div className="cs-rerror">{sessionsError}</div>
                                     ) : filteredSessions.length === 0 ? (
                                         <div className="cs-route-empty">
-                                            没有匹配的最近会话。试试调整搜索词或切换到「手动输入 ID」。
+                                            No matching sessions. Adjust search or switch to manual ID entry.
                                         </div>
                                     ) : (
                                         <div className="cs-route-session-list">
@@ -340,37 +340,37 @@ export function AddRouteModal({ isOpen, accounts, onClose, onSuccess }: AddRoute
                                 <>
                                     <input
                                         className="cs-rinput cs-rinput--mono"
-                                        placeholder="粘贴 session_id（UUID 格式，36 字符）"
+                                        placeholder="Paste session_id (UUID, 36 chars)"
                                         value={manualSessionId}
                                         onChange={(e) => setManualSessionId(e.target.value)}
                                     />
                                     {manualSessionId && !isLikelyUuid(manualSessionId) && (
                                         <div className="cs-route-hint" style={{ color: 'var(--r-accent-amber, #f59e0b)' }}>
-                                            看起来不像 UUID。请检查长度是否为 36 字符、包含 4 个连字符。
+                                            Does not look like a UUID (36 chars, 4 hyphens).
                                         </div>
                                     )}
                                 </>
                             )}
                         </div>
 
-                        {/* Step 2: 选择目标账号 */}
+                        {/* Step 2: pick account */}
                         <div className="cs-route-section">
                             <div className="cs-route-section__head">
                                 <div className="cs-route-section__title">
                                     <span className="cs-route-section__num">2</span>
-                                    选择目标账号
+                                    Choose target account
                                 </div>
                                 <input
                                     className="cs-rinput"
                                     style={{ flex: '0 0 220px' }}
-                                    placeholder="搜索账号…"
+                                    placeholder="Search accounts…"
                                     value={accountSearch}
                                     onChange={(e) => setAccountSearch(e.target.value)}
                                 />
                             </div>
 
                             {filteredAccounts.length === 0 ? (
-                                <div className="cs-route-empty">没有账号。先去「账号管理」添加。</div>
+                                <div className="cs-route-empty">No accounts. Add one under Accounts first.</div>
                             ) : (
                                 <div className="cs-route-account-list">
                                     {filteredAccounts.map((a) => {
@@ -392,7 +392,7 @@ export function AddRouteModal({ isOpen, accounts, onClose, onSuccess }: AddRoute
                                                 <span className={badge.className}>{badge.label}</span>
                                                 <span
                                                     className={`cs-route-account-row__health cs-route-account-row__health--${health}`}
-                                                    title={health === 'ok' ? '健康' : '失效或封号'}
+                                                    title={health === 'ok' ? 'Healthy' : 'Invalid or banned'}
                                                 />
                                                 {quota && (
                                                     <span className="cs-route-account-row__quota" title={quota}>
@@ -406,22 +406,22 @@ export function AddRouteModal({ isOpen, accounts, onClose, onSuccess }: AddRoute
                             )}
                         </div>
 
-                        {/* Step 3: 备注 */}
+                        {/* Step 3: Notes */}
                         <div className="cs-route-section">
                             <div className="cs-route-section__head">
                                 <div className="cs-route-section__title">
                                     <span className="cs-route-section__num">3</span>
-                                    备注（可选）
+                                    Label (optional)
                                 </div>
                             </div>
                             <input
                                 className="cs-rinput"
-                                placeholder="例如：GLM 跑文档"
+                                placeholder="e.g. GLM for docs"
                                 value={label}
                                 onChange={(e) => setLabel(e.target.value)}
                                 maxLength={64}
                             />
-                            <div className="cs-route-hint">在路由列表里显示这个名字，方便识别。</div>
+                            <div className="cs-route-hint">Shown in Routes list for recognition.</div>
                         </div>
 
                         {error && <div className="cs-rerror">{error}</div>}
@@ -431,19 +431,19 @@ export function AddRouteModal({ isOpen, accounts, onClose, onSuccess }: AddRoute
                 <div className="cs-relay-modal__footer">
                     <span style={{ fontSize: 11, color: 'var(--r-fg-muted)' }}>
                         {sessionValid && selectedAccountId
-                            ? '准备就绪 — 点「添加路由」'
-                            : '选好会话和账号即可添加'}
+                            ? 'Ready — click Add route'
+                            : 'Pick session and account to add'}
                     </span>
                     <div style={{ display: 'flex', gap: 8 }}>
                         <button className="cs-rbtn cs-rbtn--ghost" onClick={onClose} disabled={submitting}>
-                            取消
+                            Cancel
                         </button>
                         <button
                             className="cs-rbtn cs-rbtn--purple"
                             onClick={handleSubmit}
                             disabled={!canSubmit}
                         >
-                            {submitting ? '添加中…' : '添加路由'}
+                            {submitting ? 'Adding…' : 'AddRoutes'}
                         </button>
                     </div>
                 </div>

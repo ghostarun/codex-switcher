@@ -58,12 +58,12 @@ pub enum DeepLinkError {
 impl std::fmt::Display for DeepLinkError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnsupportedScheme => write!(f, "URL scheme 不识别"),
-            Self::UnsupportedAction => write!(f, "URL action 不识别（仅支持 /v1/import）"),
-            Self::NotForCodex => write!(f, "ccswitch 链接 app != codex，已忽略"),
-            Self::MissingField(name) => write!(f, "缺少必填字段: {}", name),
+            Self::UnsupportedScheme => write!(f, "Unrecognized URL scheme"),
+            Self::UnsupportedAction => write!(f, "Unsupported URL action (only /v1/import is supported)"),
+            Self::NotForCodex => write!(f, "Ignored ccswitch link because app != codex"),
+            Self::MissingField(name) => write!(f, "Missing required field: {}", name),
             Self::InvalidBaseUrl => write!(f, "endpoint/base_url 必须以 http:// 或 https:// 开头"),
-            Self::InvalidApiKey => write!(f, "apiKey 字段无效"),
+            Self::InvalidApiKey => write!(f, "Invalid apiKey field"),
         }
     }
 }

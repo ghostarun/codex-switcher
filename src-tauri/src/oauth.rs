@@ -97,17 +97,17 @@ pub async fn exchange_code(
         .body(body)
         .send()
         .await
-        .map_err(|e| format!("请求令牌失败: {}", e))?;
+        .map_err(|e| format!("Token request failed: {}", e))?;
 
     if !response.status().is_success() {
         let error_body = response.text().await.unwrap_or_default();
-        return Err(format!("OpenAI 返回错误: {}", error_body));
+        return Err(format!("OpenAI returned an error: {}", error_body));
     }
 
     response
         .json::<TokenResponse>()
         .await
-        .map_err(|e| format!("解析令牌响应失败: {}", e))
+        .map_err(|e| format!("Failed to parse token response: {}", e))
 }
 
 /// per-account rt 锁。OpenAI 的 rt 是单次使用 + 轮换：同账号并发 refresh 会让一方
@@ -196,18 +196,18 @@ pub async fn refresh_access_token_locked_fresh(
 
     // 锁内读最新 rt（不持锁过 await：读完即释放 store 锁再发网络请求）
     let rt = {
-        let s = store.lock().map_err(|_| "store 锁中毒".to_string())?;
+        let s = store.lock().map_err(|_| "Account store lock is poisoned".to_string())?;
         let acc = s
             .accounts
             .get(account_id)
-            .ok_or_else(|| "账号不存在".to_string())?;
+            .ok_or_else(|| "Account not found".to_string())?;
         if !acc.is_openai_account() {
             return Err("Non-OpenAI account cannot use OpenAI token refresh".to_string());
         }
         acc.refresh_token
             .clone()
             .or_else(|| crate::account::AccountStore::extract_refresh_token(&acc.auth_json))
-            .ok_or_else(|| "缺 refresh_token".to_string())?
+            .ok_or_else(|| "Missing refresh_token".to_string())?
     };
 
     let mut res = refresh_access_token(&rt).await;
@@ -279,7 +279,7 @@ pub async fn refresh_access_token(refresh_token: &str) -> Result<TokenResponse, 
                 break;
             }
             Err(e) => {
-                last_err = format!("刷新令牌失败: {}", e);
+                last_err = format!("Token refresh failed: {}", e);
                 if attempt < 2 {
                     // 200ms / 600ms 退避，避开瞬时抖动
                     tokio::time::sleep(Duration::from_millis(200 * (attempt as u64 * 2 + 1))).await;
@@ -291,13 +291,13 @@ pub async fn refresh_access_token(refresh_token: &str) -> Result<TokenResponse, 
 
     if !response.status().is_success() {
         let error_body = response.text().await.unwrap_or_default();
-        return Err(format!("刷新令牌被拒绝: {}", error_body));
+        return Err(format!("Token refresh was rejected: {}", error_body));
     }
 
     response
         .json::<TokenResponse>()
         .await
-        .map_err(|e| format!("解析刷新响应失败: {}", e))
+        .map_err(|e| format!("Failed to parse refresh response: {}", e))
 }
 
 /// 从 ID Token 中提取用户信息 (JWT 解析)

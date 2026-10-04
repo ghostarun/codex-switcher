@@ -51,11 +51,24 @@ pub struct LunaReserveWindow {
 }
 
 impl LunaReserveWindow {
+    /// Codex Desktop may route `gpt-6-luna` while wham/usage still reports
+    /// `normal_model_slug: gpt-5.6-luna` for the reserve pool.
+    pub fn is_luna_family_model(model: &str) -> bool {
+        let m = model.to_ascii_lowercase();
+        m == "gpt-reserve" || m.contains("luna")
+    }
+
+    pub fn has_reserve_capacity(&self) -> bool {
+        self.allowed && !self.limit_reached && self.used_percent < 100
+    }
+
     pub fn is_available_for(&self, model: &str) -> bool {
+        if !self.has_reserve_capacity() {
+            return false;
+        }
         self.normal_model_slug.eq_ignore_ascii_case(model)
-            && self.allowed
-            && !self.limit_reached
-            && self.used_percent < 100
+            || (Self::is_luna_family_model(model)
+                && Self::is_luna_family_model(&self.normal_model_slug))
     }
 }
 
@@ -167,7 +180,7 @@ impl UsageFetcher {
                     break;
                 }
                 Err(e) => {
-                    last_net_err = Some(format!("网络请求失败: {}", e));
+                    last_net_err = Some(format!("Network request failed: {}", e));
                     if attempt < 2 {
                         let wait_ms = 1000u64 * (1u64 << attempt);
                         eprintln!(
@@ -185,7 +198,7 @@ impl UsageFetcher {
         let mut response = match response {
             Some(r) => r,
             None => {
-                return Err(last_net_err.unwrap_or_else(|| "wham/usage 请求失败".to_string()));
+                return Err(last_net_err.unwrap_or_else(|| "wham/usage request failed".to_string()));
             }
         };
         status = response.status();
@@ -230,7 +243,7 @@ impl UsageFetcher {
                                 }
                                 Err(e) => {
                                     if attempt == 2 {
-                                        return Err(format!("刷新后重试失败: {}", e));
+                                        return Err(format!("Retry after refresh failed: {}", e));
                                     }
                                     tokio::time::sleep(Duration::from_millis(
                                         1000u64 * (1u64 << attempt),
@@ -239,7 +252,7 @@ impl UsageFetcher {
                                 }
                             }
                         }
-                        response = retried.ok_or_else(|| "刷新后重试失败".to_string())?;
+                        response = retried.ok_or_else(|| "Retry after refresh failed".to_string())?;
                         status = response.status();
                     }
                     Err(e) => {
@@ -253,14 +266,14 @@ impl UsageFetcher {
                             || lower.contains("session has ended")
                             || lower.contains("session_expired")
                         {
-                            return Err("ACCOUNT_LOGGED_OUT:您已登出或登录了其他账号，请重新登录"
+                            return Err("ACCOUNT_LOGGED_OUT:You are signed out or signed in to another account. Please sign in again."
                                 .to_string());
                         }
                         // 瞬时（refresh_token_reused 轮换冲突 / 网络抖动 / 边缘节流）：
                         // 绝不翻 is_token_invalid。早退一个非终态错误（不含 TOKEN_INVALID
                         // 前缀），交给下一轮配额刷新 / proxy 自愈。
                         return Err(format!(
-                            "TOKEN_REFRESH_TRANSIENT:刷新瞬时失败(reused/网络)，不标记失效: {}",
+                            "TOKEN_REFRESH_TRANSIENT:Token refresh failed temporarily (token reuse or network issue); account status unchanged: {}",
                             e
                         ));
                     }
@@ -277,22 +290,22 @@ impl UsageFetcher {
                 || body.contains("account_deactivated");
 
             if is_banned {
-                return Err("ACCOUNT_BANNED:该账号已被封禁".to_string());
+                return Err("ACCOUNT_BANNED:This account is banned.".to_string());
             }
 
             if !allow_local_refresh {
                 return Err(
-                    "当前激活账号访问配额接口返回 401/403；已禁用本地 refresh_token 刷新，请稍后重试或在 Codex 中触发一次请求".to_string(),
+                    "The active account's quota request returned 401/403. Local refresh-token renewal is disabled; try again later or make a request in Codex.".to_string(),
                 );
             }
             // 如果刷新后仍然 401/403，标记为无效
-            return Err("TOKEN_INVALID:授权已失效，请删除该账号后重新登录".to_string());
+            return Err("TOKEN_INVALID:Authorization expired. Remove this account and sign in again.".to_string());
         }
 
         let text = response
             .text()
             .await
-            .map_err(|e| format!("读取响应失败: {}", e))?;
+            .map_err(|e| format!("Failed to read response: {}", e))?;
 
         // 非 2xx 绝不能当成功：OpenAI 间歇 429/500/503 时 body 仍是 JSON
         // （如 {"error":{"code":"biscuit_baker_service_me_circuit_open"},"status":503}），
@@ -314,7 +327,7 @@ impl UsageFetcher {
                 })
                 .unwrap_or_else(|| "unknown".to_string());
             return Err(format!(
-                "USAGE_UPSTREAM_HTTP_{}: wham/usage 上游异常 (code={}): {}",
+                "USAGE_UPSTREAM_HTTP_{}: wham/usage upstream error (code={}): {}",
                 status.as_u16(),
                 code,
                 preview
@@ -322,7 +335,7 @@ impl UsageFetcher {
         }
 
         let json: Value =
-            serde_json::from_str(&text).map_err(|e| format!("解析 JSON 失败: {}", e))?;
+            serde_json::from_str(&text).map_err(|e| format!("Failed to parse JSON: {}", e))?;
 
         // 检测 200 状态码下的软封号/停用响应，如 {"detail":{"code":"deactivated_workspace"}}
         if let Some(detail_code) = json
@@ -336,7 +349,7 @@ impl UsageFetcher {
                 || code_lower.contains("suspended")
             {
                 println!("[Usage] 检测到账号停用: detail.code={}", detail_code);
-                return Err("ACCOUNT_BANNED:该账号已被封禁(workspace 已停用)".to_string());
+                return Err("ACCOUNT_BANNED:This account is banned (workspace deactivated).".to_string());
             }
         }
 
@@ -347,13 +360,13 @@ impl UsageFetcher {
             if let Some(err) = json.get("error") {
                 let preview: String = err.to_string().chars().take(200).collect();
                 return Err(format!(
-                    "USAGE_UPSTREAM_ERROR_BODY: wham/usage 返回错误体且无额度字段: {}",
+                    "USAGE_UPSTREAM_ERROR_BODY: wham/usage returned an error body without quota fields: {}",
                     preview
                 ));
             }
             let preview: String = text.chars().take(200).collect();
             return Err(format!(
-                "USAGE_EMPTY_BODY: wham/usage 200 但缺少 plan_type/rate_limit: {}",
+                "USAGE_EMPTY_BODY: wham/usage returned HTTP 200 without plan_type/rate_limit: {}",
                 preview
             ));
         }
@@ -376,12 +389,12 @@ impl UsageFetcher {
         // 解析 5 小时窗口 (Primary)
         let primary_val = rate_limit.and_then(|r| r.get("primary_window"));
         let (p_used, p_reset, p_label, p_reset_at, p_window_seconds) =
-            Self::parse_window(primary_val, "5H 限额");
+            Self::parse_window(primary_val, "5H limit");
 
         // 解析周窗口 (Secondary)
         let secondary_val = rate_limit.and_then(|r| r.get("secondary_window"));
         let (s_used, s_reset, s_label, s_reset_at, s_window_seconds) =
-            Self::parse_window(secondary_val, "周限额");
+            Self::parse_window(secondary_val, "Weekly limit");
 
         // 解析额度
         let credits = json.get("credits");
@@ -419,9 +432,9 @@ impl UsageFetcher {
             .and_then(|e| e.get("rate_limit"))
             .map(|rl| {
                 let (p_used, p_reset, _l, p_at, _) =
-                    Self::parse_window(rl.get("primary_window"), "5H 限额");
+                    Self::parse_window(rl.get("primary_window"), "5H limit");
                 let (s_used, s_reset, _l2, s_at, _) =
-                    Self::parse_window(rl.get("secondary_window"), "周限额");
+                    Self::parse_window(rl.get("secondary_window"), "Weekly limit");
                 SparkWindows {
                     five_hour_left: 100 - p_used,
                     five_hour_reset: p_reset,
@@ -498,7 +511,7 @@ impl UsageFetcher {
     ) -> (i32, String, String, Option<i64>, Option<i64>) {
         let window = match window {
             Some(w) => w,
-            None => return (0, "未知".to_string(), default_label.to_string(), None, None),
+            None => return (0, "Unknown".to_string(), default_label.to_string(), None, None),
         };
 
         // 关键修复：使用 f64 解析百分比，然后四舍五入
@@ -530,7 +543,7 @@ impl UsageFetcher {
             if ts > 0 {
                 Self::format_reset(ts)
             } else {
-                "未知".to_string()
+                "Unknown".to_string()
             }
         } else {
             // 尝试使用 reset_after_seconds
@@ -543,7 +556,7 @@ impl UsageFetcher {
             if reset_after > 0 {
                 Self::format_duration(reset_after)
             } else {
-                "未知".to_string()
+                "Unknown".to_string()
             }
         };
 
@@ -563,13 +576,13 @@ impl UsageFetcher {
         const SECS_PER_WEEK: i64 = 7 * SECS_PER_DAY;
 
         if seconds <= SECS_PER_HOUR * 5 + 600 {
-            "5H 限额".to_string()
+            "5H limit".to_string()
         } else if seconds <= SECS_PER_DAY + 600 {
-            "24H 限额".to_string()
+            "24H limit".to_string()
         } else if seconds <= SECS_PER_WEEK + 3600 {
-            "周限额".to_string()
+            "Weekly limit".to_string()
         } else {
-            format!("{}H 限额", (seconds + 3599) / 3600)
+            format!("{}H limit", (seconds + 3599) / 3600)
         }
     }
 
@@ -596,7 +609,7 @@ impl UsageFetcher {
         use chrono::{TimeZone, Utc};
 
         if reset_at == 0 {
-            return "未知".to_string();
+            return "Unknown".to_string();
         }
 
         let reset_time = Utc
@@ -616,13 +629,13 @@ impl UsageFetcher {
 
         if hours > 24 {
             let days = hours / 24;
-            format!("{}天后重置", days)
+            format!("Resets in {}d", days)
         } else if hours > 0 {
-            format!("{}小时{}分钟后重置", hours, minutes)
+            format!("Resets in {}h {}m", hours, minutes)
         } else if minutes > 0 {
-            format!("{}分钟后重置", minutes)
+            format!("Resets in {}m", minutes)
         } else {
-            "即将重置".to_string()
+            "Resetting soon".to_string()
         }
     }
 
@@ -633,13 +646,13 @@ impl UsageFetcher {
 
         if hours > 24 {
             let days = hours / 24;
-            format!("{}天后重置", days)
+            format!("Resets in {}d", days)
         } else if hours > 0 {
-            format!("{}小时{}分钟后重置", hours, minutes.abs())
+            format!("Resets in {}h {}m", hours, minutes.abs())
         } else if minutes > 0 {
-            format!("{}分钟后重置", minutes)
+            format!("Resets in {}m", minutes)
         } else {
-            "即将重置".to_string()
+            "Resetting soon".to_string()
         }
     }
 
@@ -667,7 +680,7 @@ impl UsageFetcher {
             .timeout(std::time::Duration::from_secs(15))
             .send()
             .await
-            .map_err(|e| format!("usage 请求失败: {}", e))?;
+            .map_err(|e| format!("Usage request failed: {}", e))?;
         let status = resp.status();
         if !status.is_success() {
             // 带上 URL + body 前 200 字节，方便定位（如 GLM 401 会返回中文"令牌过期"）
@@ -686,7 +699,7 @@ impl UsageFetcher {
         let body: Value = resp
             .json()
             .await
-            .map_err(|e| format!("usage JSON 解析失败: {}", e))?;
+            .map_err(|e| format!("Failed to parse usage JSON: {}", e))?;
 
         let remaining = body
             .get("remaining")
@@ -697,7 +710,7 @@ impl UsageFetcher {
                     .and_then(|v| v.as_f64())
             })
             .or_else(|| body.get("balance").and_then(|v| v.as_f64()))
-            .ok_or_else(|| "上游响应缺 remaining/balance 字段".to_string())?;
+            .ok_or_else(|| "Upstream response is missing the remaining/balance field".to_string())?;
 
         let unit = body
             .get("unit")
@@ -754,7 +767,7 @@ impl UsageFetcher {
             .timeout(std::time::Duration::from_secs(15))
             .send()
             .await
-            .map_err(|e| format!("subscription 请求失败: {}", e))?;
+            .map_err(|e| format!("Subscription request failed: {}", e))?;
         if !sub_resp.status().is_success() {
             let body_preview = sub_resp
                 .text()
@@ -769,11 +782,11 @@ impl UsageFetcher {
         let sub_body: Value = sub_resp
             .json()
             .await
-            .map_err(|e| format!("subscription JSON 解析失败: {}", e))?;
+            .map_err(|e| format!("Failed to parse subscription JSON: {}", e))?;
         let soft_limit_usd = sub_body
             .get("soft_limit_usd")
             .and_then(|v| v.as_f64())
-            .ok_or_else(|| "subscription 缺 soft_limit_usd 字段".to_string())?;
+            .ok_or_else(|| "Subscription response is missing soft_limit_usd".to_string())?;
 
         let usage_url = format!("{}/v1/dashboard/billing/usage", base);
         let usage_resp = client
@@ -783,12 +796,12 @@ impl UsageFetcher {
             .timeout(std::time::Duration::from_secs(15))
             .send()
             .await
-            .map_err(|e| format!("usage 请求失败: {}", e))?;
+            .map_err(|e| format!("Usage request failed: {}", e))?;
         let total_usage_cents = if usage_resp.status().is_success() {
             let body: Value = usage_resp
                 .json()
                 .await
-                .map_err(|e| format!("usage JSON 解析失败: {}", e))?;
+                .map_err(|e| format!("Failed to parse usage JSON: {}", e))?;
             body.get("total_usage")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.0)
@@ -891,7 +904,7 @@ impl UsageFetcher {
                     format!("{}://{}{}", scheme, h, port)
                 })
             })
-            .ok_or_else(|| format!("无法从 base_url 解析 origin: {}", base_url))?;
+            .ok_or_else(|| format!("Could not parse the origin from base_url: {}", base_url))?;
 
         let url = format!("{}/api/monitor/usage/quota/limit", origin);
         let client = reqwest::Client::new();
@@ -902,7 +915,7 @@ impl UsageFetcher {
             .timeout(std::time::Duration::from_secs(15))
             .send()
             .await
-            .map_err(|e| format!("usage 请求失败: {}", e))?;
+            .map_err(|e| format!("Usage request failed: {}", e))?;
         let status = resp.status();
         if !status.is_success() {
             let body_preview = resp
@@ -920,7 +933,7 @@ impl UsageFetcher {
         let body: Value = resp
             .json()
             .await
-            .map_err(|e| format!("usage JSON 解析失败: {}", e))?;
+            .map_err(|e| format!("Failed to parse usage JSON: {}", e))?;
 
         let code = body.get("code").and_then(|v| v.as_i64()).unwrap_or(0);
         if code != 200 {
@@ -994,7 +1007,7 @@ impl UsageFetcher {
         cookie_header: &str,
     ) -> Result<crate::account::RelayUsageCache, String> {
         let cookie = Self::normalize_mimo_cookie_header(cookie_header)
-            .ok_or_else(|| "MiMo Cookie 缺少 api-platform_serviceToken 或 userId".to_string())?;
+            .ok_or_else(|| "MiMo Cookie is missing api-platform_serviceToken or userId".to_string())?;
 
         let client = reqwest::Client::new();
         let usage_url = "https://platform.xiaomimimo.com/api/v1/tokenPlan/usage";
@@ -1020,7 +1033,7 @@ impl UsageFetcher {
             .and_then(|m| m.get("items"))
             .and_then(|v| v.as_array())
             .and_then(|arr| arr.first())
-            .ok_or_else(|| "MiMo usage 响应缺 monthUsage.items".to_string())?;
+            .ok_or_else(|| "MiMo usage response is missing monthUsage.items".to_string())?;
 
         let used = item.get("used").and_then(Self::parse_number).unwrap_or(0.0);
         let limit = item
@@ -1044,7 +1057,7 @@ impl UsageFetcher {
                     None
                 }
             })
-            .ok_or_else(|| "MiMo usage 响应缺 percent/used/limit".to_string())?;
+            .ok_or_else(|| "MiMo usage response is missing percent/used/limit".to_string())?;
 
         let used_pct = if used_pct_fraction <= 1.0 {
             used_pct_fraction * 100.0
@@ -1093,13 +1106,13 @@ impl UsageFetcher {
             .timeout(std::time::Duration::from_secs(15))
             .send()
             .await
-            .map_err(|e| format!("MiMo usage 请求失败: {}", e))?;
+            .map_err(|e| format!("MiMo usage request failed: {}", e))?;
         let status = resp.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
-            return Err("MiMo 登录态已失效，请重新登录后复制 Cookie".to_string());
+            return Err("MiMo login session expired. Sign in again and copy the Cookie.".to_string());
         }
         if status == reqwest::StatusCode::FORBIDDEN {
-            return Err("MiMo Cookie 无效或权限不足".to_string());
+            return Err("MiMo Cookie is invalid or does not have sufficient permissions.".to_string());
         }
         if !status.is_success() {
             let body_preview = resp
@@ -1116,7 +1129,7 @@ impl UsageFetcher {
         }
         resp.json()
             .await
-            .map_err(|e| format!("MiMo usage JSON 解析失败: {}", e))
+            .map_err(|e| format!("Failed to parse MiMo usage JSON: {}", e))
     }
 
     fn normalize_mimo_cookie_header(raw: &str) -> Option<String> {
@@ -1212,7 +1225,7 @@ pub async fn send_referral_invite(
     referral_key: Option<&str>,
 ) -> Result<InviteResult, String> {
     if emails.is_empty() {
-        return Err("至少需要 1 个邀请邮箱".to_string());
+        return Err("Enter at least one invitee email address.".to_string());
     }
 
     let referral_key = referral_key
@@ -1244,7 +1257,7 @@ pub async fn send_referral_invite(
     let resp = req
         .send()
         .await
-        .map_err(|e| format!("网络请求失败: {}", e))?;
+        .map_err(|e| format!("Network request failed: {}", e))?;
     let status = resp.status();
     let raw = resp.text().await.unwrap_or_default();
 
@@ -1350,21 +1363,21 @@ fn reset_credit_source(profile_user_id: &str, description: &str) -> String {
             .trim_end_matches('.');
         let handle = token.split('@').next().unwrap_or(token);
         if !handle.is_empty() {
-            return format!("邀请 {} 获得", handle);
+            return format!("Earned by inviting {}", handle);
         }
     }
     if profile_user_id.eq_ignore_ascii_case("Codex Team") {
-        return "Codex 赠送".to_string();
+        return "Granted by Codex".to_string();
     }
     if let Some(h) = profile_user_id.strip_prefix('@') {
         if !h.is_empty() {
-            return format!("邀请 {} 获得", h);
+            return format!("Earned by inviting {}", h);
         }
     }
     if !profile_user_id.is_empty() {
         return profile_user_id.to_string();
     }
-    "未知来源".to_string()
+    "Unknown source".to_string()
 }
 
 /// 拉取该账号所有「可用」的主动重置次数，按到期时间升序（最早在前）返回。
@@ -1391,21 +1404,21 @@ pub async fn list_reset_credits(
     let resp = req
         .send()
         .await
-        .map_err(|e| format!("网络请求失败: {}", e))?;
+        .map_err(|e| format!("Network request failed: {}", e))?;
     let status = resp.status();
     let raw = resp.text().await.unwrap_or_default();
     if !status.is_success() {
         return Err(match status.as_u16() {
-            401 => "token 失效（401），请刷新或重新登录".to_string(),
-            403 => "需要验证（403）".to_string(),
-            429 => "请求过于频繁（429），稍后再试".to_string(),
-            c => format!("上游返回 HTTP {}", c),
+            401 => "Token expired (401). Refresh it or sign in again.".to_string(),
+            403 => "Verification required (403).".to_string(),
+            429 => "Too many requests (429). Try again later.".to_string(),
+            c => format!("Upstream returned HTTP {}", c),
         });
     }
 
-    let json: Value = serde_json::from_str(&raw).map_err(|_| "上游返回非 JSON".to_string())?;
+    let json: Value = serde_json::from_str(&raw).map_err(|_| "Upstream returned invalid JSON".to_string())?;
     if !json.get("credits").is_some_and(Value::is_array) {
-        return Err("上游未返回有效的重置银行明细，当前次数未知（不代表已清空）".to_string());
+        return Err("Upstream did not return valid reset-credit details. The current count is unknown, not necessarily zero.".to_string());
     }
     let mut items: Vec<ResetCreditItem> = json
         .get("credits")
@@ -1500,7 +1513,7 @@ pub async fn consume_reset_credit(
     let resp = req
         .send()
         .await
-        .map_err(|e| format!("网络请求失败: {}", e))?;
+        .map_err(|e| format!("Network request failed: {}", e))?;
     let status = resp.status();
     let raw = resp.text().await.unwrap_or_default();
     let parsed = serde_json::from_str::<Value>(&raw).ok();
@@ -1518,10 +1531,10 @@ pub async fn consume_reset_credit(
                 .map(|s| s.to_string())
         });
         let message = detail.unwrap_or_else(|| match status.as_u16() {
-            401 => "token 失效（401），请刷新或重新登录".to_string(),
-            403 => "需要验证（403）".to_string(),
-            429 => "请求过于频繁（429），稍后再试".to_string(),
-            _ => format!("上游返回 HTTP {}", status.as_u16()),
+            401 => "Token expired (401). Refresh it or sign in again.".to_string(),
+            403 => "Verification required (403).".to_string(),
+            429 => "Too many requests (429). Try again later.".to_string(),
+            _ => format!("Upstream returned HTTP {}", status.as_u16()),
         });
         return Ok(ResetCreditResult {
             ok: false,
@@ -1554,11 +1567,11 @@ pub async fn consume_reset_credit(
         .map(|s| s.to_string());
     let ok = code == "reset";
     let message = match code.as_str() {
-        "reset" => format!("已重置 {} 个限额窗口", windows_reset),
-        "nothing_to_reset" => "当前没有可重置的限额（额度还没用到上限）".to_string(),
-        "no_credit" => "没有可用的主动重置次数了".to_string(),
-        "already_redeemed" => "该重置请求已经兑现过了".to_string(),
-        other => format!("上游返回：{}", other),
+        "reset" => format!("Reset {} quota window(s)", windows_reset),
+        "nothing_to_reset" => "No quota window needs resetting yet.".to_string(),
+        "no_credit" => "No reset credits are available.".to_string(),
+        "already_redeemed" => "This reset request has already been redeemed.".to_string(),
+        other => format!("Upstream returned: {}", other),
     };
 
     Ok(ResetCreditResult {
@@ -1602,7 +1615,7 @@ pub async fn send_wakeup(
     model: &str,
 ) -> Result<WakeupResult, String> {
     let prompt = if prompt.trim().is_empty() {
-        "你好"
+        "Hello"
     } else {
         prompt.trim()
     };
@@ -1652,7 +1665,7 @@ pub async fn send_wakeup(
     let resp = req
         .send()
         .await
-        .map_err(|e| format!("网络请求失败: {}", e))?;
+        .map_err(|e| format!("Network request failed: {}", e))?;
     let status = resp.status();
     let raw = resp.text().await.unwrap_or_default();
 
@@ -1724,7 +1737,7 @@ fn parse_wakeup_error(raw: &str, status: u16) -> String {
             let ty = err.get("type").and_then(|t| t.as_str()).unwrap_or("");
             let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("");
             if ty == "usage_limit_reached" {
-                return "配额已耗尽（usage_limit_reached）".to_string();
+                return "Quota exhausted (usage_limit_reached).".to_string();
             }
             if !msg.is_empty() {
                 return msg.to_string();
@@ -1739,10 +1752,10 @@ fn parse_wakeup_error(raw: &str, status: u16) -> String {
         }
     }
     match status {
-        401 => "token 失效（401）".to_string(),
-        403 => "需要验证或提交保证书（403）".to_string(),
-        429 => "配额已耗尽（429）".to_string(),
-        _ => format!("上游返回 HTTP {}", status),
+        401 => "Token expired (401).".to_string(),
+        403 => "Verification or proof of payment required (403).".to_string(),
+        429 => "Quota exhausted (429).".to_string(),
+        _ => format!("Upstream returned HTTP {}", status),
     }
 }
 
@@ -1879,6 +1892,7 @@ mod tests {
         let usage = UsageFetcher::parse_usage_response(&body).unwrap();
         let reserve = usage.luna_reserve.unwrap();
         assert!(reserve.is_available_for("gpt-5.6-luna"));
+        assert!(reserve.is_available_for("gpt-6-luna"));
         assert!(!reserve.is_available_for("gpt-5.5"));
     }
 

@@ -28,8 +28,7 @@ export interface SparkWindows {
     weekly_reset_at?: number;
 }
 
-/// Relay (中转账号) 没有 OpenAI 5h+周窗口模型，把 GLM 这类返回的百分比剩余值
-/// 映射到 UsageDisplay.five_hour_left，UsageCard 复用同一个进度条渲染。
+/// Relay accounts lack OpenAI 5h/weekly windows; map GLM-style % remaining to five_hour_left for UsageCard.
 function relayCacheToUsage(cache: RelayUsageCache, planLabel: string): UsageDisplay {
     const isPercent = (cache.unit ?? '').includes('%');
     const remaining = Number.isFinite(cache.remaining) ? cache.remaining : 0;
@@ -43,7 +42,7 @@ function relayCacheToUsage(cache: RelayUsageCache, planLabel: string): UsageDisp
         weekly_left: 0,
         weekly_reset: '',
         weekly_reset_at: undefined,
-        // 金额型 Relay：把 remaining 直接当 credits 显示
+        // Amount-style relay: show remaining as credits
         credits_balance: isPercent ? null : remaining,
         has_credits: !isPercent,
     };
@@ -61,17 +60,16 @@ export function useUsage() {
         try {
             const currentId = await invoke<string | null>('get_current_account_id');
             if (!currentId) {
-                setError('未设置当前账号');
+                setError('No current account set');
                 return;
             }
-            // Relay 账号：走专属 fetcher（GLM /api/monitor/usage/quota/limit 等），
-            // 不调 OpenAI usage（那条会返回 RELAY_ACCOUNT 错误）。
+            // Relay: dedicated fetcher (GLM /api/monitor/usage/quota/limit); not OpenAI usage.
             const accounts = await invoke<Account[]>('get_accounts');
             const acc = accounts.find(a => a.id === currentId);
             const isRelay = (acc?.kind ?? '').toLowerCase() === 'relay';
             if (isRelay) {
                 const cache = await invoke<RelayUsageCache>('refresh_relay_usage', { id: currentId });
-                const label = (acc?.relay_homepage ? '中转' : 'GLM');
+                const label = (acc?.relay_homepage ? 'Relay' : 'GLM');
                 setUsage(relayCacheToUsage(cache, label));
                 return;
             }

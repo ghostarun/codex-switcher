@@ -69,7 +69,7 @@ function ModelQuota({ model, quota, compact = false, windowLabel, blocked = fals
     model: string;
     quota: QuotaWindow;
     compact?: boolean;
-    windowLabel?: '5H' | '7D' | '额度';
+    windowLabel?: '5H' | '7D' | 'Quota';
     blocked?: boolean;
 }) {
     const resetMs = quota.reset_time ? Date.parse(quota.reset_time) : NaN;
@@ -78,9 +78,9 @@ function ModelQuota({ model, quota, compact = false, windowLabel, blocked = fals
     const percentage = typeof quota.remaining_fraction === 'number' && Number.isFinite(quota.remaining_fraction)
         ? Math.max(0, Math.min(100, quota.remaining_fraction * 100)) : undefined;
     const color = percentage === undefined ? 'neutral' : percentage > 50 ? 'green' : percentage > 20 ? 'orange' : 'red';
-    const resetText = resetAt === undefined ? '重置未知' : countdown === '--' ? '待刷新' : countdown || '…';
+    const resetText = resetAt === undefined ? 'Reset unknown' : countdown === '--' ? 'Pending refresh' : countdown || '…';
     return (
-        <div className={`quota-mini-card google-model-quota ${compact ? 'compact' : 'detail'} ${windowLabel && !compact ? 'google-window-row' : ''}`} title={`${model}\n${windowLabel || ''} ${resetAt === undefined ? '上游未提供重置时间' : `重置时间：${new Date(resetMs).toLocaleString()}`}${blocked ? '\n7D 额度已耗尽，请展开查看' : ''}`}>
+        <div className={`quota-mini-card google-model-quota ${compact ? 'compact' : 'detail'} ${windowLabel && !compact ? 'google-window-row' : ''}`} title={`${model}\n${windowLabel || ''} ${resetAt === undefined ? 'Reset time not from upstream' : `Resets: ${new Date(resetMs).toLocaleString()}`}${blocked ? '\n7D quota exhausted — expand' : ''}`}>
             {percentage !== undefined && <div className={`quota-mini-bg ${color}`} style={{ width: `${percentage}%` }} />}
             <div className="quota-mini-content">
                 <span className="quota-label">
@@ -89,8 +89,8 @@ function ModelQuota({ model, quota, compact = false, windowLabel, blocked = fals
                         <span>{compact ? compactModelName(model) : modelName(model)}</span>
                     </>}
                 </span>
-                <span className={`quota-time ${blocked ? 'quota-blocked' : 'neutral'}`}><Clock className="icon-tiny" /><span>{blocked ? '7D耗尽' : compact ? compactReset(resetText) : resetText}</span></span>
-                <span className={`quota-percent ${color}`}>{compact && windowLabel && <span className="quota-window-tag">{windowLabel}</span>}{percentage === undefined ? '未知' : `${Math.round(percentage)}%`}</span>
+                <span className={`quota-time ${blocked ? 'quota-blocked' : 'neutral'}`}><Clock className="icon-tiny" /><span>{blocked ? '7D exhausted' : compact ? compactReset(resetText) : resetText}</span></span>
+                <span className={`quota-percent ${color}`}>{compact && windowLabel && <span className="quota-window-tag">{windowLabel}</span>}{percentage === undefined ? 'Unknown' : `${Math.round(percentage)}%`}</span>
             </div>
         </div>
     );
@@ -102,30 +102,30 @@ export function AntigravityQuota({ quotas }: { quotas: Record<string, Antigravit
     const entries = Object.entries(quotas).filter(([, quota]) => quota && typeof quota === 'object')
         .sort(([a], [b]) => modelOrder(a, b));
     const summary = summaryModels(entries.map(([model]) => model));
-    if (!entries.length) return <span className="quota-empty">暂无模型额度，点击刷新</span>;
+    if (!entries.length) return <span className="quota-empty">No model quota — click refresh</span>;
     return (
         <div className="google-quota-overview">
             <div className="quota-grid">
                 {summary.map(model => {
                     const quota = quotas[model];
                     return <ModelQuota key={model} model={model} quota={quota.five_hour || quota.weekly || quota}
-                        windowLabel={quota.five_hour ? '5H' : quota.weekly ? '7D' : '额度'} blocked={weeklyBlocked(quota)} compact />;
+                        windowLabel={quota.five_hour ? '5H' : quota.weekly ? '7D' : 'Quota'} blocked={weeklyBlocked(quota)} compact />;
                 })}
             </div>
             <button type="button" className="google-quota-toggle" aria-expanded={expanded} aria-controls={panelId}
                 onClick={event => { event.stopPropagation(); setExpanded(value => !value); }}>
                 {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                {expanded ? '收起全部模型' : '查看全部模型'}（{entries.length}）
+                {expanded ? 'Collapse all models' : 'View all models'} ({entries.length})
             </button>
-            {expanded && <section id={panelId} className="google-quota-details" aria-label="全部模型额度">
-                <div className="google-quota-heading"><strong>全部模型额度</strong><span>剩余额度 · 重置倒计时</span></div>
-                <p className="google-quota-note">默认优先显示 5H；5H 与 7D 同时生效，同组模型共享额度。未获取的窗口显示未知。</p>
-                <div className="google-quota-models" tabIndex={0} role="region" aria-label="模型额度列表">
+            {expanded && <section id={panelId} className="google-quota-details" aria-label="All model quotas">
+                <div className="google-quota-heading"><strong>All model quotas</strong><span>Remaining · reset countdown</span></div>
+                <p className="google-quota-note">Shows 5H first; 5H and 7D can both apply; models in a group share quota. Unknown if window not fetched.</p>
+                <div className="google-quota-models" tabIndex={0} role="region" aria-label="Model quota list">
                     {entries.map(([model, quota]) => <div className="google-model-windows" key={model} title={model}>
                         <strong className="google-model-window-name">{modelName(model)}</strong>
                         <ModelQuota model={model} quota={quota.five_hour || {}} windowLabel="5H" />
                         <ModelQuota model={model} quota={quota.weekly || {}} windowLabel="7D" />
-                        {!quota.five_hour && !quota.weekly && <small className="google-quota-note">上游模型额度：{typeof quota.remaining_fraction === 'number' ? `${Math.round(quota.remaining_fraction * 100)}%` : '未知'}；窗口明细未获取</small>}
+                        {!quota.five_hour && !quota.weekly && <small className="google-quota-note">Upstream model quota: {typeof quota.remaining_fraction === 'number' ? `${Math.round(quota.remaining_fraction * 100)}%` : 'Unknown'}; window details not fetched</small>}
                     </div>)}
                 </div>
             </section>}

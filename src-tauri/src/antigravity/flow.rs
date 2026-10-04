@@ -47,13 +47,13 @@ pub async fn start_antigravity_oauth_login(
 
     let listener = TcpListener::bind(("127.0.0.1", CALLBACK_PORT))
         .await
-        .map_err(|e| format!("无法绑定 Antigravity OAuth 回调端口 {CALLBACK_PORT}: {e}"))?;
+        .map_err(|e| format!("Failed to bind the Antigravity OAuth callback port {CALLBACK_PORT}: {e}"))?;
     let redirect_uri = format!("http://localhost:{CALLBACK_PORT}{CALLBACK_PATH}");
     let state = generate_state();
     let config = OAuthClientConfig::from_environment();
     let auth_url = oauth::build_authorize_url(&config, &redirect_uri, &state)?;
 
-    *pending_login().lock().map_err(|_| "登录流程状态锁异常")? =
+    *pending_login().lock().map_err(|_| "Login flow state lock is unavailable")? =
         Some(PendingLogin { redirect_uri });
 
     let app = app_handle.clone();
@@ -89,7 +89,7 @@ async fn handle_callback(listener: TcpListener, app_handle: AppHandle, expected_
         };
         let request = String::from_utf8_lossy(&buffer[..size]);
         if let Some(code) = extract_code(&request, &expected_state) {
-            let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<h1>Google 授权成功</h1><p>可以关闭此窗口并返回 Codex Switcher。</p>";
+            let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<h1>Google authorization successful</h1><p>You can close this window and return to Codex Switcher.</p>";
             let _ = socket.write_all(response.as_bytes()).await;
             let _ = app_handle.emit("antigravity-oauth-callback-received", code);
             return;
@@ -123,10 +123,10 @@ pub async fn complete_oauth_login(code: String) -> Result<AntigravityCredential,
 pub fn take_pending_redirect_uri() -> Result<String, String> {
     pending_login()
         .lock()
-        .map_err(|_| "登录流程状态锁异常")?
+        .map_err(|_| "Login flow state lock is unavailable")?
         .take()
         .map(|pending| pending.redirect_uri)
-        .ok_or_else(|| "Antigravity 登录流程已过期或未启动".to_string())
+        .ok_or_else(|| "The Antigravity login flow has expired or was not started".to_string())
 }
 
 #[cfg(test)]

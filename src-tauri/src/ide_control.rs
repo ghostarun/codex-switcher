@@ -66,7 +66,7 @@ pub fn reload_ide(name: &str, use_window_reload: bool) -> Result<(), String> {
         .iter()
         .find(|&&(n, _)| n == name)
         .map(|&(_, b)| b)
-        .ok_or_else(|| format!("未找到 IDE {} 的配置", name))?;
+        .ok_or_else(|| format!("No configuration found for IDE {}", name))?;
 
     let command_text = if use_window_reload {
         "Reload Window"
@@ -98,7 +98,7 @@ pub fn reload_ide(name: &str, use_window_reload: bool) -> Result<(), String> {
         {
             // 捕获权限错误，返回一个友好的提示，而不是直接报错
             Err(
-                "PERMISSION_DENIED:需要“辅助功能”权限来重载窗口。请手动重载或在设置中授予权限。"
+                "PERMISSION_DENIED:Accessibility permission is required to reload the window. Reload it manually or grant permission in Settings."
                     .to_string(),
             )
         }
@@ -121,11 +121,11 @@ fn run_applescript(script: &str) -> Result<String, String> {
         .arg("-e")
         .arg(script)
         .output()
-        .map_err(|e| format!("无法执行 osascript: {}", e))?;
+        .map_err(|e| format!("Could not run osascript: {}", e))?;
 
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("AppleScript 执行失败: {}", err));
+        return Err(format!("AppleScript execution failed: {}", err));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())

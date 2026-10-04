@@ -43,13 +43,13 @@ export function Dashboard({
     onImportDiskAccount,
     onForceOverwriteDisk,
 }: DashboardProps) {
-    // 切号现在永远写 disk auth.json（store ↔ disk 强一致），不一致仅出现在
-    // 用户在 codex 中手动改了登录状态、或 disk 文件被外部进程改动这种边角场景。
+    // Switch always writes disk auth.json (store ↔ disk); mismatch only when
+    // user changed login in codex manually or disk edited externally.
     const isMismatched = !!(syncStatus && !syncStatus.is_synced);
     const isHarmless = isMismatched && proxyRunning;
 
-    // v0.7+ 手机锚生效场景：disk 故意"落后"于 current，但 disk 身份 = anchor，
-    // 这是 BY DESIGN 不是冲突。识别条件：有 anchor + anchor != current + disk 身份匹配 anchor。
+    // v0.7+ phone anchor: disk intentionally behind current but identity = anchor,
+    // BY DESIGN not conflict: anchor set, anchor != current, disk matches anchor.
     const anchorAccount = accounts.find(a => a.is_session_anchor);
     const anchorIsActiveLayer = !!(
         anchorAccount &&
@@ -58,10 +58,10 @@ export function Dashboard({
         isMismatched &&
         syncStatus?.matching_id === anchorAccount.id
     );
-    // 获取最佳账号推荐（配额最高的账号）
+    // Best account recommendation (highest quota)
     const getBestAccount = () => {
         if (accounts.length === 0) return null;
-        // 简单返回第一个非当前账号
+        // Return first non-current account
         return accounts.find(a => a.id !== currentAccount?.id) || null;
     };
 
@@ -69,31 +69,31 @@ export function Dashboard({
 
     return (
         <div className="dashboard">
-            {/* 问候语 */}
+            {/* Greeting */}
             <div className="dashboard-greeting">
                 <h2>
-                    你好, {currentAccount?.name.split('@')[0] || '用户'} 👋
+                    Hello, {currentAccount?.name.split('@')[0] || 'User'} 👋
                 </h2>
             </div>
 
-            {/* 统计卡片 */}
+            {/* Stats cards */}
             <StatsBar accountCount={accounts.length} usage={usage} />
 
-            {/* 手机锚生效：disk 锁定在 anchor，不显示警告而是 info 提示 */}
+            {/* Phone anchor: disk locked on anchor — info not warning */}
             {anchorIsActiveLayer && anchorAccount && (
                 <div className="sync-info-banner anchor-active">
                     <div className="banner-content">
                         <span className="banner-icon">📱</span>
                         <div className="banner-text">
-                            <strong>手机锚生效：</strong>
-                            Codex.app 仍以 <span>{anchorAccount.name}</span> 身份在线（手机 bridge 不掉线），
-                            代理出口已切到 <b>{currentAccount?.name}</b>。
+                            <strong>Phone anchor active:</strong>
+                            Codex.app stays online as <span>{anchorAccount.name}</span> (phone bridge stays up),
+                            Proxy egress switched to <b>{currentAccount?.name}</b>.
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* 旧的"磁盘落后/不一致"提示：anchor 生效时彻底隐藏（避免误导） */}
+            {/* Legacy disk mismatch banner hidden when anchor active */}
             {syncStatus && !syncStatus.is_synced && !anchorIsActiveLayer && (
                 <div className={isHarmless ? 'sync-info-banner' : 'sync-warning-banner'}>
                     <div className="banner-content">
@@ -101,15 +101,15 @@ export function Dashboard({
                         <div className="banner-text">
                             {isHarmless ? (
                                 <>
-                                    <strong>磁盘 auth.json 落后：</strong>
-                                    停在 <span>{syncStatus.disk_email || '未知账号'}</span>
-                                    （代理正在注入当前激活号的 token，<b>不影响 codex 工作</b>；
-                                    关闭代理后 codex 会读到这个号）
+                                    <strong>Disk auth.json behind:</strong>
+                                    Stuck on <span>{syncStatus.disk_email || 'Unknown account'}</span>
+                                    (Proxy injects active account token — <b>codex still works</b>;
+                                    After proxy off, codex reads this account)
                                 </>
                             ) : (
                                 <>
-                                    <strong>登录状态不一致：</strong>
-                                    检测到 IDE 正在使用 <span>{syncStatus.disk_email || '未知账号'}</span>
+                                    <strong>Session mismatch:</strong>
+                                    IDE is using <span>{syncStatus.disk_email || 'Unknown account'}</span>
                                 </>
                             )}
                         </div>
@@ -117,25 +117,25 @@ export function Dashboard({
                     <div className="banner-actions">
                         {syncStatus.matching_id ? (
                             <button className="btn btn-sm btn-accent" onClick={onSyncWithDisk}>
-                                {isHarmless ? '同步磁盘' : '修正激活状态'}
+                                {isHarmless ? 'Sync disk' : 'Fix active state'}
                             </button>
                         ) : (
-                            <button className="btn btn-sm btn-primary" onClick={() => onImportDiskAccount(syncStatus.disk_email || '新账号')}>
-                                立即导入该账号
+                            <button className="btn btn-sm btn-primary" onClick={() => onImportDiskAccount(syncStatus.disk_email || 'New account')}>
+                                Import this account
                             </button>
                         )}
                     </div>
                 </div>
             )}
 
-            {/* 双栏布局 */}
+            {/* Two-column layout */}
             <div className="dashboard-grid">
-                {/* 当前账号 */}
+                {/* Current Account */}
                 <div className={`dashboard-card current-account ${isCurrentInvalid ? 'invalid' : ''}`}>
                     <div className="card-header">
                         <span className="card-icon">✓</span>
-                        <h3>当前账号</h3>
-                        {isCurrentInvalid && <span className="invalid-badge" title="授权已失效，请删除后重新登录">⚠️ 失效</span>}
+                        <h3>Current Account</h3>
+                        {isCurrentInvalid && <span className="invalid-badge" title="Auth expired — delete and sign in again">⚠️ Invalid</span>}
                     </div>
                     {currentAccount ? (
                         <div className="current-account-content">
@@ -150,28 +150,28 @@ export function Dashboard({
                             {isMismatched && !anchorIsActiveLayer ? (
                                 <div className="mismatch-panel">
                                     <div className="mismatch-headline">
-                                        与 ~/.codex/auth.json 身份不匹配
+                                        Does not match ~/.codex/auth.json identity
                                     </div>
                                     <div className="mismatch-detail">
-                                        IDE 当前用：<span className="mono">{syncStatus?.disk_email || '未知'}</span>
+                                        IDE currently:<span className="mono">{syncStatus?.disk_email || 'Unknown'}</span>
                                     </div>
                                     <div className="mismatch-actions">
                                         <button
                                             className="btn btn-primary btn-sm"
                                             onClick={onForceOverwriteDisk}
                                         >
-                                            用此账号覆盖 IDE
+                                            Overwrite IDE with this account
                                         </button>
                                         {syncStatus?.matching_id ? (
                                             <button className="btn btn-ghost btn-sm" onClick={onSyncWithDisk}>
-                                                改用 IDE 当前
+                                                Use IDE current
                                             </button>
                                         ) : (
                                             <button
                                                 className="btn btn-ghost btn-sm"
-                                                onClick={() => onImportDiskAccount(syncStatus?.disk_email || '新账号')}
+                                                onClick={() => onImportDiskAccount(syncStatus?.disk_email || 'New account')}
                                             >
-                                                导入 IDE 当前
+                                                Import IDE current
                                             </button>
                                         )}
                                     </div>
@@ -189,33 +189,33 @@ export function Dashboard({
                                 className="btn btn-outline btn-full"
                                 onClick={onNavigateToAccounts}
                             >
-                                切换账号
+                                Switch account
                             </button>
                         </div>
                     ) : (
                         <div className="no-account">
-                            <p>暂无账号</p>
+                            <p>No accounts</p>
                         </div>
                     )}
                 </div>
 
-                {/* 最佳账号推荐 */}
+                {/* Best account pick */}
                 <div className="dashboard-card best-accounts">
                     <div className="card-header">
                         <span className="card-icon">↗</span>
-                        <h3>最佳账号推荐</h3>
+                        <h3>Best account pick</h3>
                     </div>
                     <div className="best-accounts-list">
                         {bestAccount ? (
                             <div className="best-account-item">
                                 <div className="account-label">
-                                    <span className="label-text">推荐账号</span>
+                                    <span className="label-text">Recommended</span>
                                     <span className="account-email">{bestAccount.name}</span>
                                 </div>
                                 <span className="quota-badge">100%</span>
                             </div>
                         ) : (
-                            <p className="no-recommendation">暂无推荐</p>
+                            <p className="no-recommendation">No recommendation</p>
                         )}
                     </div>
                     {accounts.length > 1 && (
@@ -223,20 +223,20 @@ export function Dashboard({
                             className="btn btn-accent btn-full"
                             onClick={() => bestAccount && onSwitch(bestAccount.id)}
                         >
-                            一键切换最佳
+                            Switch to best
                         </button>
                     )}
                 </div>
             </div>
 
-            {/* 快速链接 */}
+            {/* Quick links */}
             <div className="dashboard-links">
                 <button className="link-card" onClick={onNavigateToAccounts}>
-                    <span>查看所有账号</span>
+                    <span>View all accounts</span>
                     <span className="link-arrow">→</span>
                 </button>
                 <button className="link-card" onClick={onExport}>
-                    <span>导出账号数据</span>
+                    <span>Export account data</span>
                     <span className="link-icon">↓</span>
                 </button>
             </div>

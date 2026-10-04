@@ -11,7 +11,7 @@ interface AddAccountModalProps {
     isOpen: boolean;
     onClose: () => void;
     onAdd: (name: string, notes?: string) => Promise<void>;
-    onSuccess?: () => void;  // 添加成功后的回调，用于刷新父组件列表
+    onSuccess?: () => void;  // Callback after successful add, to refresh parent list
 }
 
 type TabType = 'official' | 'openai' | 'google' | 'bulk' | 'relay' | 'session';
@@ -53,10 +53,10 @@ interface BulkImportResult {
 }
 
 const BULK_FORMAT_LABEL: Record<string, string> = {
-    cpa: 'cpa（codex_credentials）',
+    cpa: 'cpa (codex_credentials)',
     sub2api: 'sub2api',
     cockpit: 'Cockpit',
-    'four-segment-rt': '四段RT',
+    'four-segment-rt': 'four-segment RT',
     native: 'codex-switcher',
 };
 
@@ -81,16 +81,16 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
     const [showPasteInput, setShowPasteInput] = useState(false);
     const [callbackInput, setCallbackInput] = useState('');
     const [submittingCallback, setSubmittingCallback] = useState(false);
-    // 批量导入
+    // Bulk import
     const [bulkBusy, setBulkBusy] = useState(false);
     const [bulkResult, setBulkResult] = useState<BulkImportResult | null>(null);
     const [bulkError, setBulkError] = useState<string | null>(null);
-    // ChatGPT Web session 导入（无 refresh_token，access_token 过期前可用）
+    // ChatGPT Web session import (no refresh_token; works until access_token expires)
     const [sessionInput, setSessionInput] = useState('');
     const [sessionBusy, setSessionBusy] = useState(false);
     const [sessionResult, setSessionResult] = useState<ImportSessionResult | null>(null);
     const [sessionError, setSessionError] = useState<string | null>(null);
-    // 中转站（Relay）
+    // Relay
     const [relayPresetId, setRelayPresetId] = useState<string>(RELAY_PRESETS[0]?.id ?? 'custom');
     const [relayName, setRelayName] = useState<string>(RELAY_PRESETS[0]?.name ?? '');
     const [relayBaseUrl, setRelayBaseUrl] = useState<string>(RELAY_PRESETS[0]?.base_url ?? '');
@@ -102,11 +102,11 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
     const [relayModelFallback, setRelayModelFallback] = useState<string>(
         RELAY_PRESETS[0]?.model_fallback ?? '',
     );
-    // 上游协议：'responses'（默认 / 上游懂 codex /v1/responses）/ 'chat_completions'（GLM 等只懂 /chat/completions 的）
+    // Upstream protocol: 'responses' (default / codex /v1/responses) / 'chat_completions' (GLM etc. only /chat/completions)
     const [relayProtocol, setRelayProtocol] = useState<string>(
         RELAY_PRESETS[0]?.relay_protocol ?? 'responses',
     );
-    // 模型映射用 textarea（"key=value\n..." 格式）展示给用户编辑
+    // Model map shown in textarea ("key=value\n..." format) for editing
     const [relayModelMapText, setRelayModelMapText] = useState<string>(() => {
         const m = RELAY_PRESETS[0]?.model_map;
         return m ? Object.entries(m).map(([k, v]) => `${k}=${v}`).join('\n') : '';
@@ -130,7 +130,7 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
         setRelayError(null);
     };
 
-    /** 把 textarea 文本解析成 { key: value }，忽略空行 / 注释 / 不含 = 的行 */
+    /** Parse textarea to { key: value }; skip empty lines / comments / lines without = */
     const parseModelMapText = (text: string): Record<string, string> => {
         const out: Record<string, string> = {};
         for (const line of text.split('\n')) {
@@ -148,19 +148,19 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
     const handleSubmitRelay = async () => {
         setRelayError(null);
         if (!relayName.trim()) {
-            setRelayError('账号名不能为空');
+            setRelayError('Account name cannot be empty');
             return;
         }
         if (!/^https?:\/\//.test(relayBaseUrl.trim())) {
-            setRelayError('Base URL 必须以 http:// 或 https:// 开头');
+            setRelayError('Base URL must start with http:// or https://');
             return;
         }
         if (relayApiKey.trim().length < 8) {
-            setRelayError('API Key 看起来太短');
+            setRelayError('API Key looks too short');
             return;
         }
         if (relayUsagePreset === 'mimo_token_plan' && !relayUsageCookie.trim()) {
-            setRelayError('MiMo 配额查询需要粘贴 platform.xiaomimimo.com 的 Cookie；如果暂时不查配额，请把余额查询策略改成“不拉取”。');
+            setRelayError('MiMo quota lookup requires a Cookie from platform.xiaomimimo.com; to skip quota, set balance strategy to "Do not fetch".');
             return;
         }
         setRelaySubmitting(true);
@@ -180,7 +180,7 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                 relayProtocol: relayProtocol === 'responses' ? null : relayProtocol,
             });
             await emit('accounts-updated');
-            // 重置表单
+            // Reset form
             setRelayApiKey('');
             setRelayUsageCookie('');
             handleClose();
@@ -191,20 +191,20 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
         }
     };
 
-    // 监听后端发来的授权码
+    // Listen for authorization code from backend
     useEffect(() => {
         if (!isOpen) return;
 
         const unlisten = listen<string>('oauth-callback-received', async (event) => {
             const code = event.payload;
-            setOauthStatus('已获取授权码，正在交换令牌...');
+            setOauthStatus('Authorization code received; exchanging token...');
             try {
                 await finalizeOAuthLogin(code);
-                setOauthStatus('授权成功！账号已添加。');
+                setOauthStatus('Authorization successful! Account added.');
                 setLoading(false);
-                // 延迟关闭模态框，让用户看到成功提示
+                // Delay closing modal so user sees success message
                 setTimeout(() => {
-                    onSuccess?.();  // 通知父组件刷新列表
+                    onSuccess?.();  // Notify parent to refresh list
                     onClose();
                 }, 1000);
             } catch (err) {
@@ -222,10 +222,10 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
     useEffect(() => {
         if (!isOpen) return;
         const unlisten = listen<string>('antigravity-oauth-callback-received', async (event) => {
-            setOauthStatus('已获取 Google 授权码，正在验证账号和项目...');
+            setOauthStatus('Google auth code received; verifying account and project...');
             try {
                 await invoke('finalize_antigravity_oauth_login', { code: event.payload });
-                setOauthStatus('Google Antigravity 账号已添加。');
+                setOauthStatus('Google Antigravity account added.');
                 setLoading(false);
                 setTimeout(() => {
                     onSuccess?.();
@@ -242,11 +242,11 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
 
     if (!isOpen) return null;
 
-    // 处理官方导入
+    // Handle official import
     const handleSubmitOfficial = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!name.trim()) {
-            setError('请输入账号名称');
+            setError('Please enter account name');
             return;
         }
 
@@ -263,16 +263,16 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
         }
     };
 
-    // 处理 OpenAI 登录
+    // Handle OpenAI login
     const handleOpenAILogin = async () => {
         setLoading(true);
         setError(null);
-        setOauthStatus('正在启动官方浏览器授权...');
+        setOauthStatus('Starting official browser authorization...');
 
         try {
-            // 启动 OAuth 后端任务，后端会处理打开浏览器和启动监听
+            // Start OAuth backend task; opens browser and listener
             await startOAuthLogin();
-            setOauthStatus('请在打开的浏览器窗口中完成 OpenAI 授权...');
+            setOauthStatus('Complete OpenAI authorization in the opened browser window...');
         } catch (err) {
             setError(String(err));
             setOauthStatus('');
@@ -280,23 +280,23 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
         }
     };
 
-    // 复制授权链接（不开默认浏览器，让用户自己选要用哪个浏览器粘贴）
+    // Copy auth link (no default browser — user picks browser to paste into)
     const handleCopyOAuthLink = async () => {
         setLoading(true);
         setError(null);
-        setOauthStatus('正在生成授权链接...');
+        setOauthStatus('Generating authorization link...');
 
         try {
             const url = await startOAuthLogin(false);
-            // 走后端 pbcopy 而不是 navigator.clipboard：webview 跨 await 后 user-gesture 失效会触发 NotAllowedError
+            // Use backend pbcopy not navigator.clipboard (webview loses user-gesture after await)
             try {
                 await invoke('copy_to_clipboard', { text: url });
-                setOauthStatus('授权链接已复制，请粘贴到目标浏览器完成授权，回调会自动回到本应用...');
+                setOauthStatus('Auth link copied — paste in your browser; callback returns to this app...');
             } catch (copyErr) {
-                // 复制失败也别卡住流程：把 URL 显示出来让用户手动复制
+                // If copy fails, show URL for manual copy
                 setCallbackInput(url);
                 setShowPasteInput(false);
-                setOauthStatus(`复制到剪贴板失败（${String(copyErr)}），请手动复制：\n${url}`);
+                setOauthStatus(`Clipboard copy failed (${String(copyErr)}); copy manually:\n${url}`);
             }
         } catch (err) {
             setError(String(err));
@@ -308,10 +308,10 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
     const handleAntigravityLogin = async () => {
         setLoading(true);
         setError(null);
-        setOauthStatus('正在启动 Google Antigravity 授权...');
+        setOauthStatus('Starting Google Antigravity authorization...');
         try {
             await invoke<string>('start_antigravity_oauth_login', { openBrowser: true });
-            setOauthStatus('请在浏览器中完成 Google 授权...');
+            setOauthStatus('Complete Google authorization in the browser...');
         } catch (err) {
             setError(String(err));
             setOauthStatus('');
@@ -322,14 +322,14 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
     const handleCopyAntigravityOAuthLink = async () => {
         setLoading(true);
         setError(null);
-        setOauthStatus('正在生成 Google 授权链接...');
+        setOauthStatus('Generating Google auth link...');
         try {
             const url = await invoke<string>('start_antigravity_oauth_login', { openBrowser: false });
             try {
                 await invoke('copy_to_clipboard', { text: url });
-                setOauthStatus('Google 授权链接已复制，请粘贴到目标浏览器完成授权...');
+                setOauthStatus('Google auth link copied — paste in your browser to finish...');
             } catch (copyError) {
-                setOauthStatus(`复制到剪贴板失败（${String(copyError)}），请手动复制：\n${url}`);
+                setOauthStatus(`Clipboard copy failed (${String(copyError)}); copy manually:\n${url}`);
             }
         } catch (err) {
             setError(String(err));
@@ -339,7 +339,7 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
     };
 
     const handleClose = () => {
-        // OAuth 进行中也允许关闭：后端 oauth_server 下次 start 时会 abort 旧任务，无需显式取消
+        // OAuth in progress can close; backend aborts old task on next start
         setName('');
         setNotes('');
         setError(null);
@@ -347,8 +347,8 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
         setLoading(false);
         setShowPasteInput(false);
         setCallbackInput('');
-        // 批量导入结果保留到下次打开（用户可能想再回来看），但 bulkBusy 防误触
-        // Session 导入：成功后清空输入避免重复提交；保留 result 供回头看
+        // Keep bulk import results until next open; bulkBusy prevents mis-clicks
+        // Session import: clear input after success; keep result for review
         if (sessionResult && sessionResult.ok.length > 0) {
             setSessionInput('');
         }
@@ -361,8 +361,8 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
         const selection = await openDialog({
             multiple: true,
             filters: [
-                { name: '账号导入文件', extensions: ['json', 'zip', 'txt'] },
-                { name: '所有文件', extensions: ['*'] },
+                { name: 'Account import files', extensions: ['json', 'zip', 'txt'] },
+                { name: 'All files', extensions: ['*'] },
             ],
         });
         const paths: string[] = Array.isArray(selection) ? selection : (selection ? [selection] : []);
@@ -384,14 +384,14 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
         }
     };
 
-    // ChatGPT Web session 导入：粘贴 chatgpt.com 的 session JSON（带 accessToken）
-    // → 转成我们的 auth.json 并落库。源逻辑参考 gtxx3600/GPTSession2CPAandSub2API。
-    // 没有 refresh_token，约 30 天后 access_token 过期需要重新导入。
+    // ChatGPT Web session import: paste chatgpt.com session JSON (with accessToken)
+    // → convert to auth.json and store. See gtxx3600/GPTSession2CPAandSub2API.
+    // No refresh_token; ~30 days later access_token expires — re-import required.
     const handleSessionImport = async () => {
         setSessionError(null);
         setSessionResult(null);
         if (!sessionInput.trim()) {
-            setSessionError('请粘贴 ChatGPT session JSON');
+            setSessionError('Please paste ChatGPT session JSON');
             return;
         }
         setSessionBusy(true);
@@ -411,7 +411,7 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
         }
     };
 
-    // 浏览器跳不回本机时手动提交回调链接
+    // Manually submit callback URL when browser cannot return to app
     const handleSubmitCallback = async () => {
         const input = callbackInput.trim();
         if (!input) return;
@@ -419,8 +419,8 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
         setError(null);
         try {
             await invoke('submit_oauth_callback', { input });
-            // 后端会派发 oauth-callback-received，useEffect 里的监听会走 finalize 流程
-            setOauthStatus('已提交回调链接，正在交换令牌...');
+            // Backend emits oauth-callback-received; listener finalizes OAuth
+            setOauthStatus('Callback URL submitted; exchanging token...');
             setCallbackInput('');
             setShowPasteInput(false);
         } catch (err) {
@@ -438,7 +438,7 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
             >
                 <div className="modal-header">
                     <div className="header-top">
-                        <h2>添加账号</h2>
+                        <h2>Add Account</h2>
                         <button className="close-btn" onClick={handleClose}>
                             ×
                         </button>
@@ -448,13 +448,13 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                             className={`tab-item ${activeTab === 'openai' ? 'active' : ''}`}
                             onClick={() => !loading && setActiveTab('openai')}
                         >
-                            OpenAI 登录 (推荐)
+                            OpenAI Login (Recommended)
                         </button>
                         <button
                             className={`tab-item ${activeTab === 'official' ? 'active' : ''}`}
                             onClick={() => !loading && setActiveTab('official')}
                         >
-                            从官方导入
+                            Import from Official
                         </button>
                         <button
                             className={`tab-item ${activeTab === 'google' ? 'active' : ''}`}
@@ -466,15 +466,15 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                             className={`tab-item ${activeTab === 'bulk' ? 'active' : ''}`}
                             onClick={() => !loading && setActiveTab('bulk')}
                         >
-                            批量导入文件
+                            Bulk Import Files
                         </button>
                         <button
                             className={`tab-item ${activeTab === 'session' ? 'active' : ''}`}
                             onClick={() => !loading && setActiveTab('session')}
                         >
-                            Session 导入
+                            Session Import
                         </button>
-                        {/* "中转站" tab moved to dedicated AddRelayModal — see App.tsx 顶部 "+ 添加中转" 按钮 */}
+                        {/* "Relay" tab moved to AddRelayModal — see App.tsx "+ Add Relay" */}
                     </div>
                 </div>
 
@@ -482,11 +482,11 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                     {activeTab === 'bulk' ? (
                         <div className="bulk-panel">
                             <p className="modal-tip">
-                                自动识别格式，可一次选多个文件：<b>cpa</b>（codex_credentials zip / 单 .json）、
-                                <b> sub2api</b>、<b>Cockpit</b>、<b>四段RT</b>
-                                （<code>email----xxx----xxx----rt_xxx</code>）、
-                                <b> codex-switcher 原生 accounts.json</b>。
-                                同邮箱已存在的账号会跳过，不覆盖现有 token。
+                                Auto-detect format; select multiple files:<b>cpa</b>(codex_credentials zip / single .json),
+                                <b> sub2api</b>, <b>Cockpit</b>, <b>four-segment RT</b>
+                                (<code>email----xxx----xxx----rt_xxx</code>),
+                                <b> codex-switcher native accounts.json</b>.
+                                Existing email skipped; tokens not overwritten.
                             </p>
                             <button
                                 className="btn btn-primary btn-full"
@@ -494,27 +494,27 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                 onClick={handleBulkPickAndImport}
                                 disabled={bulkBusy}
                             >
-                                {bulkBusy ? '导入中…' : '选择文件并导入'}
+                                {bulkBusy ? 'Importing…' : 'Select files and import'}
                             </button>
                             {bulkError && <div className="error-msg" style={{ marginTop: 12 }}>{bulkError}</div>}
                             {bulkResult && (
                                 <div className="bulk-result" style={{ marginTop: 16 }}>
                                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-                                        <span className="bulk-stat">解析 {bulkResult.summaries.reduce((s, x) => s + x.parsed, 0)}</span>
-                                        <span className="bulk-stat ok">新增 {bulkResult.accounts.length}</span>
+                                        <span className="bulk-stat">Parsed {bulkResult.summaries.reduce((s, x) => s + x.parsed, 0)}</span>
+                                        <span className="bulk-stat ok">Added {bulkResult.accounts.length}</span>
                                         {bulkResult.summaries.reduce((s, x) => s + x.parsed, 0) - bulkResult.accounts.length > 0 && (
                                             <span className="bulk-stat skip">
-                                                跳过 {bulkResult.summaries.reduce((s, x) => s + x.parsed, 0) - bulkResult.accounts.length}（同名）
+                                                Skipped {bulkResult.summaries.reduce((s, x) => s + x.parsed, 0) - bulkResult.accounts.length} (duplicate)
                                             </span>
                                         )}
                                         {bulkResult.fatal.length > 0 && (
-                                            <span className="bulk-stat fail">失败 {bulkResult.fatal.length}</span>
+                                            <span className="bulk-stat fail">Failed {bulkResult.fatal.length}</span>
                                         )}
                                     </div>
                                     {bulkResult.summaries.map((s, i) => (
                                         <div key={i} className="bulk-summary-item">
                                             <span className="format-tag">{BULK_FORMAT_LABEL[s.format] || s.format}</span>
-                                            <span>解析 {s.parsed} 个账号</span>
+                                            <span>Parsed {s.parsed} account(s)</span>
                                         </div>
                                     ))}
                                     {bulkResult.fatal.map((msg, i) => (
@@ -523,18 +523,18 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                     {bulkResult.accounts.length > 0 && (
                                         <details style={{ marginTop: 8 }}>
                                             <summary style={{ cursor: 'pointer', color: '#aaa', fontSize: '12.5px', padding: '6px 0' }}>
-                                                新增账号详情（{bulkResult.accounts.length}）
+                                                Added accounts ({bulkResult.accounts.length})
                                             </summary>
                                             <table className="bulk-table">
                                                 <thead>
-                                                    <tr><th>Email</th><th>Plan</th><th>状态</th></tr>
+                                                    <tr><th>Email</th><th>Plan</th><th>Status</th></tr>
                                                 </thead>
                                                 <tbody>
                                                     {bulkResult.accounts.map((a, i) => (
                                                         <tr key={i}>
                                                             <td>{a.email}</td>
                                                             <td>{a.plan_type || '—'}</td>
-                                                            <td>{a.needs_refresh ? <span className="needs-refresh">⚠ 仅 RT，首次请求自动 refresh</span> : '✓ ready'}</td>
+                                                            <td>{a.needs_refresh ? <span className="needs-refresh">⚠ RT only; auto refresh on first request</span> : '✓ ready'}</td>
                                                         </tr>
                                                     ))}
                                                 </tbody>
@@ -547,12 +547,12 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                     ) : activeTab === 'session' ? (
                         <div className="bulk-panel">
                             <p className="modal-tip">
-                                粘贴 <b>chatgpt.com 网页登录的 session JSON</b>（带 <code>accessToken / user.email / account.id</code>），
-                                绕过 Codex 手机验证。支持单个对象、对象数组、或者嵌套容器，会自动递归识别。
+                                Paste <b>chatgpt.com web session JSON</b> (<code>accessToken / user.email / account.id</code>),
+                                Bypass Codex phone verification. Single object, array, or nested — auto-detected.
                                 <br />
-                                <b style={{ color: 'var(--text-secondary)' }}>注意：</b>
-                                Web session 没有 <code>refresh_token</code>，<code>access_token</code> 失效（约 30 天）后账号会变成不可用，
-                                需要重新粘贴一次新 session。Plus 账号能正常调用模型，Free 账号即使导入也无 API 权限。
+                                <b style={{ color: 'var(--text-secondary)' }}>Note:</b>
+                                Web session has no <code>refresh_token</code>; after ~30 days <code>access_token</code> expires the account stops working.
+                                Re-paste a new session. Plus can call models; Free has no API access even after import.
                             </p>
                             <textarea
                                 className="text-input"
@@ -569,33 +569,33 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                     onClick={handleSessionImport}
                                     disabled={sessionBusy || !sessionInput.trim()}
                                 >
-                                    {sessionBusy ? '导入中…' : '解析并导入'}
+                                    {sessionBusy ? 'Importing…' : 'Parse and import'}
                                 </button>
                                 <button
                                     className="btn btn-ghost"
                                     onClick={() => { setSessionInput(''); setSessionResult(null); setSessionError(null); }}
                                     disabled={sessionBusy || (!sessionInput && !sessionResult && !sessionError)}
                                 >
-                                    清空
+                                    Clear
                                 </button>
                             </div>
                             {sessionError && <div className="error-message" style={{ marginTop: 12 }}>{sessionError}</div>}
                             {sessionResult && (
                                 <div className="bulk-result" style={{ marginTop: 16 }}>
                                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-                                        <span className="bulk-stat ok">新增 {sessionResult.ok.length}</span>
+                                        <span className="bulk-stat ok">Added {sessionResult.ok.length}</span>
                                         {sessionResult.errors.length > 0 && (
-                                            <span className="bulk-stat fail">失败 {sessionResult.errors.length}</span>
+                                            <span className="bulk-stat fail">Failed {sessionResult.errors.length}</span>
                                         )}
                                     </div>
                                     {sessionResult.ok.length > 0 && (
                                         <details open style={{ marginTop: 8 }}>
                                             <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 12.5, padding: '6px 0' }}>
-                                                导入账号详情（{sessionResult.ok.length}）
+                                                Imported accounts ({sessionResult.ok.length})
                                             </summary>
                                             <table className="bulk-table">
                                                 <thead>
-                                                    <tr><th>Email</th><th>Plan</th><th>说明</th></tr>
+                                                    <tr><th>Email</th><th>Plan</th><th>Notes</th></tr>
                                                 </thead>
                                                 <tbody>
                                                     {sessionResult.ok.map((item, i) => (
@@ -604,9 +604,9 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                                             <td>{item.info.plan_type || '—'}</td>
                                                             <td>
                                                                 {item.info.has_refresh_token
-                                                                    ? '✓ 含 refresh_token'
-                                                                    : <span className="needs-refresh">⚠ 无 refresh_token，到期后需重新导入</span>}
-                                                                {item.info.id_token_synthetic ? '（id_token 合成）' : ''}
+                                                                    ? '✓ has refresh_token'
+                                                                    : <span className="needs-refresh">⚠ no refresh_token; re-import after expiry</span>}
+                                                                {item.info.id_token_synthetic ? '(id_token synthesized)' : ''}
                                                             </td>
                                                         </tr>
                                                     ))}
@@ -617,7 +617,7 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                     {sessionResult.errors.length > 0 && (
                                         <details open style={{ marginTop: 8 }}>
                                             <summary style={{ cursor: 'pointer', color: 'var(--danger, #c54)', fontSize: 12.5, padding: '6px 0' }}>
-                                                失败项（{sessionResult.errors.length}）
+                                                Failed ({sessionResult.errors.length})
                                             </summary>
                                             {sessionResult.errors.map((err, i) => (
                                                 <div key={i} className="bulk-fatal">⚠ {err.source_path}: {err.reason}</div>
@@ -630,12 +630,12 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                     ) : activeTab === 'relay' ? (
                         <div className="relay-panel">
                             <p className="modal-tip" style={{ marginBottom: 12 }}>
-                                选预设自动填 base_url，贴 API Key 即可。也支持 <code>codexswitch://</code> deep link。
+                                Pick preset for base_url; paste API Key. Also <code>codexswitch://</code> deep link.
                             </p>
 
                             <div className="relay-form-grid">
                             <div className="form-group form-group-full">
-                                <label htmlFor="relay-preset">预设</label>
+                                <label htmlFor="relay-preset">Preset</label>
                                 <select
                                     id="relay-preset"
                                     value={relayPresetId}
@@ -651,14 +651,14 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                             </div>
 
                             <div className="form-group">
-                                <label htmlFor="relay-name">账号名称 *</label>
+                                <label htmlFor="relay-name">Account name *</label>
                                 <input
                                     id="relay-name"
                                     type="text"
                                     value={relayName}
                                     onChange={e => setRelayName(e.target.value)}
                                     disabled={relaySubmitting}
-                                    placeholder="例如：unity2-工作"
+                                    placeholder="e.g. unity2-work"
                                 />
                             </div>
 
@@ -689,26 +689,26 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                             </div>
 
                             <div className="form-group">
-                                <label htmlFor="relay-usage">余额查询策略</label>
+                                <label htmlFor="relay-usage">Balance fetch strategy</label>
                                 <select
                                     id="relay-usage"
                                     value={relayUsagePreset ?? ''}
                                     onChange={e => setRelayUsagePreset(e.target.value || null)}
                                     disabled={relaySubmitting}
                                 >
-                                    <option value="">不拉取</option>
+                                    <option value="">Do not fetch</option>
                                     <option value="openai_compat">openai_compat (GET /v1/usage)</option>
-                                    <option value="glm_zhipu">glm_zhipu (GLM 自家 quota 接口)</option>
-                                    <option value="kimi_coding">kimi_coding (Kimi 编程套餐 5H / 7D)</option>
-                                    <option value="mimo_token_plan">mimo_token_plan (MiMo 控制台 Cookie)</option>
+                                    <option value="glm_zhipu">glm_zhipu (GLM quota API)</option>
+                                    <option value="kimi_coding">kimi_coding (Kimi coding plan 5H / 7D)</option>
+                                    <option value="mimo_token_plan">mimo_token_plan (MiMo console Cookie)</option>
                                 </select>
                             </div>
 
                             {relayUsagePreset === 'mimo_token_plan' && (
                                 <div className="form-group form-group-full">
                                     <label htmlFor="relay-usage-cookie">
-                                        MiMo 配额 Cookie <span style={{ color: 'var(--text-muted)', fontWeight: 'normal', fontSize: 12 }}>
-                                            登录 platform.xiaomimimo.com 后，从 Network 复制 Cookie header
+                                        MiMo quota Cookie <span style={{ color: 'var(--text-muted)', fontWeight: 'normal', fontSize: 12 }}>
+                                            After signing in at platform.xiaomimimo.com, copy Cookie header from Network
                                         </span>
                                     </label>
                                     <textarea
@@ -721,15 +721,15 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                         style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12, width: '100%' }}
                                     />
                                     <p className="modal-tip" style={{ margin: '6px 0 0', fontSize: 12 }}>
-                                        这里的 Cookie 只用于查询 Token Plan 用量，不会参与模型请求。实际调用仍使用上面的 tp-key。
+                                        Cookie is for Token Plan usage only, not model calls. Calls use tp-key above.
                                     </p>
                                 </div>
                             )}
 
                             <div className="form-group">
                                 <label htmlFor="relay-protocol">
-                                    上游协议 <span style={{ color: 'var(--text-muted)', fontWeight: 'normal', fontSize: 12 }}>
-                                        中转站讲什么 wire format
+                                    Upstream protocol <span style={{ color: 'var(--text-muted)', fontWeight: 'normal', fontSize: 12 }}>
+                                        Which wire format the relay speaks
                                     </span>
                                 </label>
                                 <select
@@ -738,15 +738,15 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                     onChange={e => setRelayProtocol(e.target.value)}
                                     disabled={relaySubmitting}
                                 >
-                                    <option value="responses">responses（默认 / Unity2、ChatGPT、OpenAI key）</option>
-                                    <option value="chat_completions">chat_completions（GLM/MiMo Coding Plan / 通用 OpenAI Chat）</option>
+                                    <option value="responses">responses (default / Unity2, ChatGPT, OpenAI key)</option>
+                                    <option value="chat_completions">chat_completions (GLM/MiMo Coding Plan / generic OpenAI Chat)</option>
                                 </select>
                             </div>
 
                             <div className="form-group">
                                 <label htmlFor="relay-model-fallback">
-                                    模型兜底 <span style={{ color: 'var(--text-muted)', fontWeight: 'normal', fontSize: 12 }}>
-                                        客户端发的 model 没命中映射时，统一替换成这个
+                                    Model fallback <span style={{ color: 'var(--text-muted)', fontWeight: 'normal', fontSize: 12 }}>
+                                        Replace client model with this when not in map
                                     </span>
                                 </label>
                                 <input
@@ -755,15 +755,15 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                     value={relayModelFallback}
                                     onChange={e => setRelayModelFallback(e.target.value)}
                                     disabled={relaySubmitting}
-                                    placeholder="如 glm-5.1（留空 = 透传不替换）"
+                                    placeholder="e.g. glm-5.1 (empty = pass through)"
                                     style={{ fontFamily: 'ui-monospace, Menlo, monospace' }}
                                 />
                             </div>
 
                             <div className="form-group form-group-full">
                                 <label htmlFor="relay-model-map">
-                                    模型映射表 <span style={{ color: 'var(--text-muted)', fontWeight: 'normal', fontSize: 12 }}>
-                                        每行 <code>客户端model=中转站model</code>
+                                    Model map <span style={{ color: 'var(--text-muted)', fontWeight: 'normal', fontSize: 12 }}>
+                                        One line per <code>clientModel=relayModel</code>
                                     </span>
                                 </label>
                                 <textarea
@@ -782,10 +782,10 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
 
                             <div className="modal-footer" style={{ padding: '16px 0 0', border: 'none' }}>
                                 <button type="button" className="btn btn-ghost" onClick={handleClose} disabled={relaySubmitting}>
-                                    取消
+                                    Cancel
                                 </button>
                                 <button type="button" className="btn btn-primary" onClick={handleSubmitRelay} disabled={relaySubmitting}>
-                                    {relaySubmitting ? '导入中…' : '导入中转站'}
+                                    {relaySubmitting ? 'Importing…' : 'Import relay'}
                                 </button>
                             </div>
                         </div>
@@ -794,7 +794,7 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                             <div className="oauth-icon">◆</div>
                             <h3 style={{ marginBottom: '8px', color: 'var(--text-primary)' }}>Google Antigravity OAuth</h3>
                             <p className="oauth-desc">
-                                授权后 Gemini 模型通过 Codex Switcher 原生路由；不会修改 Codex 的 OpenAI 登录身份。
+                                After auth, Gemini routes via Codex Switcher; does not change Codex OpenAI login.
                             </p>
                             <button
                                 className="btn btn-primary btn-full"
@@ -802,7 +802,7 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                 onClick={handleAntigravityLogin}
                                 disabled={loading}
                             >
-                                {loading ? '处理中...' : '连接 Google 账号'}
+                                {loading ? 'Processing...' : 'Connect Google account'}
                             </button>
                             <button
                                 className="btn btn-ghost btn-full"
@@ -810,12 +810,12 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                 onClick={handleCopyAntigravityOAuthLink}
                                 disabled={loading}
                                 type="button"
-                                title="不打开默认浏览器，把 Google 授权链接复制到剪贴板"
+                                title="Do not open default browser; copy Google auth link to clipboard"
                             >
-                                复制授权链接（指定浏览器登录）
+                                Copy auth link (choose browser)
                             </button>
                             {!loading && (
-                                <button className="btn btn-ghost btn-full" style={{ marginTop: '12px' }} onClick={handleClose}>取消</button>
+                                <button className="btn btn-ghost btn-full" style={{ marginTop: '12px' }} onClick={handleClose}>Cancel</button>
                             )}
                             {oauthStatus && <div className="oauth-status">{oauthStatus}</div>}
                             {error && <div className="error-message" style={{ marginTop: '16px' }}>{error}</div>}
@@ -823,29 +823,29 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                     ) : activeTab === 'official' ? (
                         <form onSubmit={handleSubmitOfficial}>
                             <p className="modal-tip">
-                                将从本地官方 Codex 的登录状态 (`auth.json`) 中提取认证信息。
+                                Extract auth from local official Codex login (`auth.json`).
                             </p>
 
                             <div className="form-group">
-                                <label htmlFor="name">账号名称 *</label>
+                                <label htmlFor="name">Account name *</label>
                                 <input
                                     id="name"
                                     type="text"
                                     value={name}
                                     onChange={e => setName(e.target.value)}
-                                    placeholder="例如：工作账号、个人账号"
+                                    placeholder="e.g. Work account, Personal account"
                                     disabled={loading}
                                     autoFocus
                                 />
                             </div>
 
                             <div className="form-group">
-                                <label htmlFor="notes">备注</label>
+                                <label htmlFor="notes">Notes</label>
                                 <textarea
                                     id="notes"
                                     value={notes}
                                     onChange={e => setNotes(e.target.value)}
-                                    placeholder="可选的备注信息..."
+                                    placeholder="Optional notes..."
                                     disabled={loading}
                                     rows={3}
                                 />
@@ -855,19 +855,19 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
 
                             <div className="modal-footer" style={{ padding: '16px 0 0', border: 'none' }}>
                                 <button type="button" className="btn btn-ghost" onClick={handleClose} disabled={loading}>
-                                    取消
+                                    Cancel
                                 </button>
                                 <button type="submit" className="btn btn-primary" disabled={loading}>
-                                    {loading ? '导入中...' : '导入当前账号'}
+                                    {loading ? 'Importing...' : 'Import current account'}
                                 </button>
                             </div>
                         </form>
                     ) : (
                         <div className="oauth-content">
                             <div className="oauth-icon">🛡️</div>
-                            <h3 style={{ marginBottom: '8px', color: 'var(--text-primary)' }}>官方 OAuth 授权</h3>
+                            <h3 style={{ marginBottom: '8px', color: 'var(--text-primary)' }}>Official OAuth authorization</h3>
                             <p className="oauth-desc">
-                                直接通过 OpenAI 官方渠道登录。支持令牌自动续期，多账号切换更稳定，无需再手动更新 `auth.json`。
+                                Sign in via OpenAI official channel. Auto token renewal; stable multi-account switching without manual `auth.json` updates.
                             </p>
 
                             <button
@@ -876,7 +876,7 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                 onClick={handleOpenAILogin}
                                 disabled={loading}
                             >
-                                {loading && oauthStatus ? '处理中...' : '立即登录 OpenAI'}
+                                {loading && oauthStatus ? 'Processing...' : 'Sign in with OpenAI now'}
                             </button>
 
                             <button
@@ -885,9 +885,9 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                 onClick={handleCopyOAuthLink}
                                 disabled={loading}
                                 type="button"
-                                title="不打开默认浏览器，把授权链接复制到剪贴板，由你粘贴到目标浏览器"
+                                title="Do not open default browser; copy auth link to clipboard for your chosen browser"
                             >
-                                复制授权链接（指定浏览器登录）
+                                Copy auth link (choose browser)
                             </button>
 
                             {!loading && (
@@ -896,7 +896,7 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                     style={{ marginTop: '12px' }}
                                     onClick={handleClose}
                                 >
-                                    取消
+                                    Cancel
                                 </button>
                             )}
 
@@ -904,7 +904,7 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                             {error && <div className="error-message" style={{ marginTop: '16px' }}>{error}</div>}
 
                             <div style={{ marginTop: '16px', fontSize: '12px', color: 'var(--text-tertiary)', textAlign: 'center' }}>
-                                授权将在你系统的默认浏览器中完成，安全可信。
+                                Authorization completes in your default browser; secure and trusted.
                             </div>
 
                             {!showPasteInput ? (
@@ -914,12 +914,12 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                     onClick={() => setShowPasteInput(true)}
                                     type="button"
                                 >
-                                    浏览器没跳回来？手动粘贴回调链接
+                                    Browser did not return? Paste callback URL manually
                                 </button>
                             ) : (
                                 <div style={{ marginTop: '12px', textAlign: 'left' }}>
                                     <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                                        从浏览器地址栏复制完整 URL（包含 <code>?code=...&state=...</code>）粘贴到下方：
+                                        Copy full URL from address bar (with <code>?code=...&state=...</code>) below:
                                     </div>
                                     <textarea
                                         className="text-input"
@@ -937,7 +937,7 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                             disabled={submittingCallback || !callbackInput.trim()}
                                             type="button"
                                         >
-                                            {submittingCallback ? '提交中...' : '开始授权'}
+                                            {submittingCallback ? 'Submitting...' : 'Start authorization'}
                                         </button>
                                         <button
                                             className="btn btn-ghost"
@@ -945,7 +945,7 @@ export function AddAccountModal({ isOpen, onClose, onAdd, onSuccess }: AddAccoun
                                             disabled={submittingCallback}
                                             type="button"
                                         >
-                                            取消
+                                            Cancel
                                         </button>
                                     </div>
                                 </div>

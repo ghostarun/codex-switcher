@@ -1,5 +1,6 @@
 import { UsageDisplay } from '../hooks/useUsage';
 import { useCountdown } from '../hooks/useCountdown';
+import { displayResetText } from '../utils/englishQuotaText';
 import './UsageCard.css';
 
 interface UsageCardProps {
@@ -15,7 +16,7 @@ export function UsageCard({ usage, loading, error, onRefresh }: UsageCardProps) 
         return (
             <div className="usage-inline loading">
                 <div className="spinner-small" />
-                <span>加载用量...</span>
+                <span>Loading usage...</span>
             </div>
         );
     }
@@ -25,7 +26,7 @@ export function UsageCard({ usage, loading, error, onRefresh }: UsageCardProps) 
             <div className="usage-inline error">
                 <span className="error-text">{error}</span>
                 <button className="btn btn-ghost btn-sm" onClick={onRefresh}>
-                    重试
+                    Retry
                 </button>
             </div>
         );
@@ -41,10 +42,10 @@ export function UsageCard({ usage, loading, error, onRefresh }: UsageCardProps) 
 
     return (
         <div className="usage-meters">
-            {/* 5小时配额 / 免费限额 */}
+            {/* 5h quota / free limit */}
             <div className="usage-row">
-                <span className="usage-label">{isFree ? '限额' : '5h 配额'}</span>
-                <span className="usage-reset">{fiveHourTimeLeft || usage.five_hour_reset}</span>
+                <span className="usage-label">{isFree ? 'Limit' : '5h Quota'}</span>
+                <span className="usage-reset">{displayResetText(fiveHourTimeLeft || usage.five_hour_reset)}</span>
                 <span className="usage-percent">{usage.five_hour_left}%</span>
             </div>
             <div className="meter-bar">
@@ -54,12 +55,12 @@ export function UsageCard({ usage, loading, error, onRefresh }: UsageCardProps) 
                 />
             </div>
 
-            {/* 周配额 - PRO 账号显示 */}
+            {/* Weekly quota — PRO accounts */}
             {!isFree && (
                 <>
                     <div className="usage-row">
-                        <span className="usage-label">周配额</span>
-                        <span className="usage-reset">{weeklyTimeLeft || usage.weekly_reset}</span>
+                        <span className="usage-label">Weekly Quota</span>
+                        <span className="usage-reset">{displayResetText(weeklyTimeLeft || usage.weekly_reset)}</span>
                         <span className="usage-percent">{usage.weekly_left}%</span>
                     </div>
                     <div className="meter-bar">
@@ -87,10 +88,10 @@ export function UsageCard({ usage, loading, error, onRefresh }: UsageCardProps) 
                 </>
             )}
 
-            {/* 额度 */}
+            {/* Credits */}
             {usage.has_credits && usage.credits_balance !== null && (
                 <div className="usage-credits">
-                    <span className="credits-label">💰 额度</span>
+                    <span className="credits-label">💰 Credits</span>
                     <span className="credits-value">${usage.credits_balance.toFixed(2)}</span>
                 </div>
             )}

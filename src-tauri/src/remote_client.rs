@@ -108,7 +108,7 @@ pub async fn resolve_base_url(primary: &str, fallback: &str) -> Result<String, S
     let p = primary.trim().to_string();
     let f = fallback.trim().to_string();
     if p.is_empty() && f.is_empty() {
-        return Err("未配置 Server 地址".to_string());
+        return Err("Server address is not configured".to_string());
     }
     // 缓存命中：必须匹配当前配置（防止 settings 改完仍用旧 URL）
     if let Some(c) = cached_url() {
@@ -122,14 +122,14 @@ pub async fn resolve_base_url(primary: &str, fallback: &str) -> Result<String, S
             set_cached_url(&f);
             return Ok(f);
         }
-        return Err(format!("Server 不可达（fallback={}）", f));
+        return Err(format!("Server is unreachable (fallback={})", f));
     }
     if f.is_empty() {
         if probe(&p).await {
             set_cached_url(&p);
             return Ok(p);
         }
-        return Err(format!("Server 不可达（primary={}）", p));
+        return Err(format!("Server is unreachable (primary={})", p));
     }
 
     // 双地址：并行探测，第一个返 OK 的赢。
@@ -175,7 +175,7 @@ pub async fn resolve_base_url(primary: &str, fallback: &str) -> Result<String, S
         set_cached_url(&url);
         Ok(url)
     } else {
-        Err(format!("Server 不可达（primary={}, fallback={}）", p, f))
+        Err(format!("Server is unreachable (primary={}, fallback={})", p, f))
     }
 }
 
@@ -223,7 +223,7 @@ pub async fn fetch_antigravity_token(
         .header(AUTH_HEADER, secret)
         .send()
         .await
-        .map_err(|error| format!("Server Google token 租约失败: {error}"))?;
+        .map_err(|error| format!("Server Google token lease failed: {error}"))?;
     let status = response.status();
     let body: Value = response.json().await.map_err(|error| error.to_string())?;
     if !status.is_success() {
@@ -265,7 +265,7 @@ pub async fn fetch_antigravity_token(
         return Err(body
             .get("error")
             .and_then(Value::as_str)
-            .unwrap_or("Server Google token 租约失败")
+            .unwrap_or("Server Google token lease failed")
             .to_string());
     }
     serde_json::from_value(body).map_err(|error| error.to_string())
@@ -294,7 +294,7 @@ fn client() -> Result<Client, String> {
         .no_proxy()
         .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
         .build()
-        .map_err(|e| format!("构建 HTTP client 失败: {}", e))
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))
 }
 
 fn trim_url(base: &str) -> String {
@@ -308,13 +308,13 @@ pub async fn health(base_url: &str) -> Result<RemoteHealth, String> {
         .get(&url)
         .send()
         .await
-        .map_err(|e| format!("连接 Server 失败: {}", e))?;
+        .map_err(|e| format!("Failed to connect to Server: {}", e))?;
     if !resp.status().is_success() {
-        return Err(format!("Server /health 返回 {}", resp.status()));
+        return Err(format!("Server /health returned {}", resp.status()));
     }
     resp.json::<RemoteHealth>()
         .await
-        .map_err(|e| format!("解析 /health 响应失败: {}", e))
+        .map_err(|e| format!("Failed to parse /health response: {}", e))
 }
 
 /// 测试连接+密钥是否正确（会拉 /accounts 看是否 200）
@@ -326,12 +326,12 @@ pub async fn test_auth(base_url: &str, secret: &str) -> Result<RemoteHealth, Str
         .header(AUTH_HEADER, secret)
         .send()
         .await
-        .map_err(|e| format!("连接失败: {}", e))?;
+        .map_err(|e| format!("Connection failed: {}", e))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("共享密钥不正确".to_string());
+        return Err("The shared secret is incorrect".to_string());
     }
     if !resp.status().is_success() {
-        return Err(format!("Server /accounts 返回 {}", resp.status()));
+        return Err(format!("Server /accounts returned {}", resp.status()));
     }
     Ok(h)
 }
@@ -344,19 +344,19 @@ pub async fn list_accounts(base_url: &str, secret: &str) -> Result<Vec<Account>,
         .header(AUTH_HEADER, secret)
         .send()
         .await
-        .map_err(|e| format!("请求失败: {}", e))?;
+        .map_err(|e| format!("Request failed: {}", e))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("共享密钥不正确".to_string());
+        return Err("The shared secret is incorrect".to_string());
     }
     if !resp.status().is_success() {
-        return Err(format!("Server 返回 {}", resp.status()));
+        return Err(format!("Server returned {}", resp.status()));
     }
     let body: Value = resp.json().await.map_err(|e| e.to_string())?;
     let arr = body
         .get("accounts")
-        .ok_or("响应缺少 accounts 字段")?
+        .ok_or("Response is missing the accounts field")?
         .clone();
-    serde_json::from_value(arr).map_err(|e| format!("反序列化账号列表失败: {}", e))
+    serde_json::from_value(arr).map_err(|e| format!("Failed to deserialize account list: {}", e))
 }
 
 /// Google-only, token-free mirrors. This must not use the generic credential list.
@@ -458,7 +458,7 @@ pub async fn upsert_account(
         .no_proxy()
         .timeout(Duration::from_secs(45))
         .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
     let resp = c
         .post(&url)
         .header(AUTH_HEADER, secret)
@@ -466,18 +466,18 @@ pub async fn upsert_account(
         .body(serde_json::to_vec(&payload).map_err(|e| e.to_string())?)
         .send()
         .await
-        .map_err(|e| format!("POST 失败: {}", e))?;
+        .map_err(|e| format!("POST request failed: {}", e))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("共享密钥不正确".to_string());
+        return Err("The shared secret is incorrect".to_string());
     }
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Server 返回 {}: {}", status, body));
+        return Err(format!("Server returned {}: {}", status, body));
     }
     resp.json::<UpsertOutcome>()
         .await
-        .map_err(|e| format!("解析 upsert 响应失败: {}", e))
+        .map_err(|e| format!("Failed to parse upsert response: {}", e))
 }
 
 /// Client 模式把 Google OAuth code 交给权威 Server 完成交换。
@@ -493,28 +493,28 @@ pub async fn complete_antigravity_oauth(
         .no_proxy()
         .timeout(Duration::from_secs(60))
         .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?
         .post(url)
         .header(AUTH_HEADER, secret)
         .json(&serde_json::json!({"code": code, "redirect_uri": redirect_uri}))
         .send()
         .await
-        .map_err(|e| format!("Server Google OAuth 请求失败: {e}"))?;
+        .map_err(|e| format!("Server Google OAuth request failed: {e}"))?;
     let status = response.status();
     let body: Value = response.json().await.map_err(|e| e.to_string())?;
     if !status.is_success() {
         return Err(body
             .get("error")
             .and_then(Value::as_str)
-            .unwrap_or("Server Google OAuth 失败")
+            .unwrap_or("Server Google OAuth failed")
             .to_string());
     }
     serde_json::from_value(
         body.get("account")
             .cloned()
-            .ok_or_else(|| "Server OAuth 响应缺少 account".to_string())?,
+            .ok_or_else(|| "Server OAuth response is missing the account".to_string())?,
     )
-    .map_err(|e| format!("解析 Google 账号镜像失败: {e}"))
+    .map_err(|e| format!("Failed to parse Google account mirror: {e}"))
 }
 
 /// 删除 Server 上指定账号
@@ -525,12 +525,12 @@ pub async fn delete_account(base_url: &str, secret: &str, id: &str) -> Result<()
         .header(AUTH_HEADER, secret)
         .send()
         .await
-        .map_err(|e| format!("DELETE 失败: {}", e))?;
+        .map_err(|e| format!("DELETE request failed: {}", e))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("共享密钥不正确".to_string());
+        return Err("The shared secret is incorrect".to_string());
     }
     if !resp.status().is_success() && resp.status() != reqwest::StatusCode::NOT_FOUND {
-        return Err(format!("Server 返回 {}", resp.status()));
+        return Err(format!("Server returned {}", resp.status()));
     }
     Ok(())
 }
@@ -554,20 +554,20 @@ pub async fn refresh_antigravity_quota(
         .header(AUTH_HEADER, secret)
         .send()
         .await
-        .map_err(|error| format!("Google 额度查询失败: {error}"))?;
+        .map_err(|error| format!("Google quota lookup failed: {error}"))?;
     let status = response.status();
     let body: Value = response.json().await.map_err(|error| error.to_string())?;
     if !status.is_success() {
         return Err(body
             .get("error")
             .and_then(Value::as_str)
-            .unwrap_or("Server Google 额度查询失败")
+            .unwrap_or("Server Google quota lookup failed")
             .to_string());
     }
     serde_json::from_value(
         body.get("model_quotas")
             .cloned()
-            .ok_or("响应缺少模型额度")?,
+            .ok_or("Response is missing model quotas")?,
     )
     .map_err(|error| error.to_string())
 }
@@ -582,16 +582,16 @@ pub async fn fetch_all_quota(
         .header(AUTH_HEADER, secret)
         .send()
         .await
-        .map_err(|e| format!("GET /quotas 失败: {}", e))?;
+        .map_err(|e| format!("GET /quotas failed: {}", e))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("共享密钥不正确".to_string());
+        return Err("The shared secret is incorrect".to_string());
     }
     if !resp.status().is_success() {
-        return Err(format!("Server 返回 {}", resp.status()));
+        return Err(format!("Server returned {}", resp.status()));
     }
     let body: Value = resp.json().await.map_err(|e| e.to_string())?;
-    let arr = body.get("quotas").ok_or("响应缺少 quotas 字段")?.clone();
-    serde_json::from_value(arr).map_err(|e| format!("反序列化 quotas 失败: {}", e))
+    let arr = body.get("quotas").ok_or("Response is missing the quotas field")?.clone();
+    serde_json::from_value(arr).map_err(|e| format!("Failed to deserialize quotas: {}", e))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -628,16 +628,16 @@ pub async fn get_current(base_url: &str, secret: &str) -> Result<RemoteCurrent, 
         .header(AUTH_HEADER, secret)
         .send()
         .await
-        .map_err(|e| format!("GET /current 失败: {}", e))?;
+        .map_err(|e| format!("GET /current failed: {}", e))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("共享密钥不正确".to_string());
+        return Err("The shared secret is incorrect".to_string());
     }
     if !resp.status().is_success() {
-        return Err(format!("Server 返回 {}", resp.status()));
+        return Err(format!("Server returned {}", resp.status()));
     }
     resp.json::<RemoteCurrent>()
         .await
-        .map_err(|e| format!("解析 /current 响应失败: {}", e))
+        .map_err(|e| format!("Failed to parse /current response: {}", e))
 }
 
 pub async fn request_switch(
@@ -655,16 +655,16 @@ pub async fn request_switch(
         .body(serde_json::to_vec(&body).map_err(|e| e.to_string())?)
         .send()
         .await
-        .map_err(|e| format!("POST /switch 失败: {}", e))?;
+        .map_err(|e| format!("POST /switch failed: {}", e))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("共享密钥不正确".to_string());
+        return Err("The shared secret is incorrect".to_string());
     }
     if !resp.status().is_success() {
-        return Err(format!("Server 返回 {}", resp.status()));
+        return Err(format!("Server returned {}", resp.status()));
     }
     resp.json::<RemoteSwitchOutcome>()
         .await
-        .map_err(|e| format!("解析 /switch 响应失败: {}", e))
+        .map_err(|e| format!("Failed to parse /switch response: {}", e))
 }
 
 /// 列出 Server 已安装的 skill 目录名
@@ -675,16 +675,16 @@ pub async fn list_remote_skills(base_url: &str, secret: &str) -> Result<Vec<Stri
         .header(AUTH_HEADER, secret)
         .send()
         .await
-        .map_err(|e| format!("GET /skills 失败: {}", e))?;
+        .map_err(|e| format!("GET /skills failed: {}", e))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("共享密钥不正确".to_string());
+        return Err("The shared secret is incorrect".to_string());
     }
     if !resp.status().is_success() {
-        return Err(format!("Server 返回 {}", resp.status()));
+        return Err(format!("Server returned {}", resp.status()));
     }
     let body: Value = resp.json().await.map_err(|e| e.to_string())?;
-    let arr = body.get("skills").ok_or("响应缺少 skills 字段")?.clone();
-    serde_json::from_value(arr).map_err(|e| format!("反序列化 skills 失败: {}", e))
+    let arr = body.get("skills").ok_or("Response is missing the skills field")?.clone();
+    serde_json::from_value(arr).map_err(|e| format!("Failed to deserialize skills: {}", e))
 }
 
 /// 将一个 skill zip 推送到 Server
@@ -703,21 +703,21 @@ pub async fn upload_skill(
         .no_proxy()
         .timeout(Duration::from_secs(60))
         .build()
-        .map_err(|e| format!("构建 HTTP client 失败: {}", e))?
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?
         .post(&url)
         .header(AUTH_HEADER, secret)
         .header("Content-Type", "application/zip")
         .body(zip_bytes)
         .send()
         .await
-        .map_err(|e| format!("POST /skills/upload 失败: {}", e))?;
+        .map_err(|e| format!("POST /skills/upload failed: {}", e))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("共享密钥不正确".to_string());
+        return Err("The shared secret is incorrect".to_string());
     }
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Server 返回 {}: {}", status, body));
+        return Err(format!("Server returned {}: {}", status, body));
     }
     Ok(())
 }
@@ -749,32 +749,32 @@ pub async fn refresh_account_quota(
         .no_proxy()
         .timeout(Duration::from_secs(45))
         .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
     let resp = c
         .post(&url)
         .header(AUTH_HEADER, secret)
         .send()
         .await
-        .map_err(|e| format!("POST /accounts/{}/refresh 失败: {}", id, e))?;
+        .map_err(|e| format!("POST /accounts/{}/refresh failed: {}", id, e))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("共享密钥不正确".to_string());
+        return Err("The shared secret is incorrect".to_string());
     }
     let status = resp.status();
     let body: Value = resp
         .json()
         .await
-        .map_err(|e| format!("解析刷新响应失败: {}", e))?;
+        .map_err(|e| format!("Failed to parse refresh response: {}", e))?;
     if !status.is_success() {
         let err = body
             .get("error")
             .and_then(|v| v.as_str())
-            .unwrap_or("未知错误")
+            .unwrap_or("Unknown error")
             .to_string();
         return Err(err);
     }
-    let usage = body.get("usage").cloned().ok_or("响应缺少 usage 字段")?;
+    let usage = body.get("usage").cloned().ok_or("Response is missing the usage field")?;
     let parsed: crate::usage::UsageDisplay =
-        serde_json::from_value(usage).map_err(|e| format!("反序列化 usage 失败: {}", e))?;
+        serde_json::from_value(usage).map_err(|e| format!("Failed to deserialize usage: {}", e))?;
     // 防御：旧版 Server 会把上游 503/空体「解析」成 plan_type=unknown + 100%/「未知」。
     // 那是假额度，绝不能写进本机 cached_quota 覆盖真实数据。Server 升级后此分支不应再触发。
     let plan = parsed.plan_type.to_lowercase();
@@ -785,7 +785,7 @@ pub async fn refresh_account_quota(
         && parsed.weekly_reset_at.is_none();
     if looks_empty {
         return Err(
-            "USAGE_EMPTY_FROM_SERVER: Server 返回了空额度(unknown/未知)，可能是上游 503 被旧版误解析；已拒绝写缓存，请升级 Mini Mac 端或稍后重试"
+            "USAGE_EMPTY_FROM_SERVER: Server returned empty quotas (unknown); this may be a misparsed upstream 503. The cache was not updated. Update the Mini Mac client or try again later."
                 .to_string(),
         );
     }
@@ -808,12 +808,12 @@ pub async fn send_solo_heartbeat(
         .body(serde_json::to_vec(&body).map_err(|e| e.to_string())?)
         .send()
         .await
-        .map_err(|e| format!("心跳失败: {}", e))?;
+        .map_err(|e| format!("Heartbeat failed: {}", e))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("共享密钥不正确".to_string());
+        return Err("The shared secret is incorrect".to_string());
     }
     if !resp.status().is_success() {
-        return Err(format!("Server 返回 {}", resp.status()));
+        return Err(format!("Server returned {}", resp.status()));
     }
     Ok(())
 }
@@ -840,12 +840,12 @@ pub async fn push_solo_switch(
         .body(serde_json::to_vec(&body).map_err(|e| e.to_string())?)
         .send()
         .await
-        .map_err(|e| format!("push /solo/current 失败: {}", e))?;
+        .map_err(|e| format!("Failed to push /solo/current: {}", e))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("共享密钥不正确".to_string());
+        return Err("The shared secret is incorrect".to_string());
     }
     if !resp.status().is_success() {
-        return Err(format!("Server 返回 {}", resp.status()));
+        return Err(format!("Server returned {}", resp.status()));
     }
     Ok(())
 }
@@ -858,16 +858,16 @@ pub async fn fetch_token(base_url: &str, secret: &str, id: &str) -> Result<Remot
         .header(AUTH_HEADER, secret)
         .send()
         .await
-        .map_err(|e| format!("GET token 失败: {}", e))?;
+        .map_err(|e| format!("GET token failed: {}", e))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("共享密钥不正确".to_string());
+        return Err("The shared secret is incorrect".to_string());
     }
     if !resp.status().is_success() {
-        return Err(format!("Server 返回 {}", resp.status()));
+        return Err(format!("Server returned {}", resp.status()));
     }
     resp.json::<RemoteToken>()
         .await
-        .map_err(|e| format!("解析 token 响应失败: {}", e))
+        .map_err(|e| format!("Failed to parse token response: {}", e))
 }
 
 /// 让 Server 就地强制刷新指定账号的 access_token，返回刷新后的 auth_json。
@@ -884,14 +884,14 @@ pub async fn refresh_token_now(
         .header(AUTH_HEADER, secret)
         .send()
         .await
-        .map_err(|e| format!("POST refresh-token 失败: {}", e))?;
+        .map_err(|e| format!("POST refresh-token failed: {}", e))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("共享密钥不正确".to_string());
+        return Err("The shared secret is incorrect".to_string());
     }
     if !resp.status().is_success() {
-        return Err(format!("Server 返回 {}", resp.status()));
+        return Err(format!("Server returned {}", resp.status()));
     }
     resp.json::<RemoteToken>()
         .await
-        .map_err(|e| format!("解析 refresh-token 响应失败: {}", e))
+        .map_err(|e| format!("Failed to parse refresh-token response: {}", e))
 }

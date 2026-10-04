@@ -56,7 +56,7 @@ impl SessionRoutesStore {
     /// 磁盘路径：`~/.codex-switcher/session_routes.json`
     pub fn config_path() -> PathBuf {
         dirs::home_dir()
-            .expect("无法获取用户目录")
+            .expect("Could not determine the user directory")
             .join(".codex-switcher")
             .join("session_routes.json")
     }
@@ -106,19 +106,19 @@ impl SessionRoutesStore {
     pub fn save(&self) -> Result<(), String> {
         let path = Self::config_path();
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
         }
         let tmp_path = path.with_extension("json.tmp");
         let content =
-            serde_json::to_string_pretty(self).map_err(|e| format!("序列化失败: {}", e))?;
+            serde_json::to_string_pretty(self).map_err(|e| format!("Failed to serialize session routes: {}", e))?;
         {
             let mut f =
-                fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
+                fs::File::create(&tmp_path).map_err(|e| format!("Failed to create temporary file: {}", e))?;
             f.write_all(content.as_bytes())
-                .map_err(|e| format!("写入临时文件失败: {}", e))?;
+                .map_err(|e| format!("Failed to write temporary file: {}", e))?;
             f.sync_all().ok();
         }
-        fs::rename(&tmp_path, &path).map_err(|e| format!("重命名临时文件失败: {}", e))?;
+        fs::rename(&tmp_path, &path).map_err(|e| format!("Failed to rename temporary file: {}", e))?;
         Ok(())
     }
 

@@ -264,16 +264,16 @@ fn anchor_rejected_on_non_oauth_does_not_corrupt_state() {
 
     store
         .set_session_anchor(&oauth_id, true)
-        .expect("OAuth 设 anchor ok");
+        .expect("Setting a phone anchor on an OAuth account should succeed.");
     let err = store
         .set_session_anchor(&relay.id, true)
-        .expect_err("relay 不能当 anchor");
-    assert!(err.contains("ChatGPT 订阅号"));
+        .expect_err("A relay account must not be accepted as a phone anchor.");
+    assert!(err.contains("ChatGPT subscription account"));
 
     assert_eq!(
         store.session_anchor_id().as_deref(),
         Some(oauth_id.as_str()),
-        "失败后原 anchor 应保留"
+        "The original phone anchor should remain after the failed operation."
     );
     assert!(!store.accounts.get(&relay.id).unwrap().is_session_anchor);
 }

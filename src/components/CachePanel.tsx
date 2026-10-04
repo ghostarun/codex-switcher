@@ -63,14 +63,14 @@ interface Props {
     accounts: AccountInfo[];
 }
 
-const UNKNOWN_LABEL = '(早期数据·无 account)';
+const UNKNOWN_LABEL = '(legacy · no account)';
 
 export default function CachePanel({ accounts }: Props) {
     const [history, setHistory] = useState<TokenHistoryEntry[]>([]);
     const [bindings, setBindings] = useState<SessionBinding[]>([]);
     const [loading, setLoading] = useState(true);
     const [days, setDays] = useState(7);
-    // 早期没记 account_id 的旧条目默认隐藏；切到 false 看全量
+    // Legacy entries without account_id hidden by default; toggle off for all
     const [hideUnknown, setHideUnknown] = useState(true);
 
     const refresh = async () => {
@@ -100,19 +100,19 @@ export default function CachePanel({ accounts }: Props) {
         return m;
     }, [accounts]);
 
-    // 应用"隐藏旧数据"过滤
+    // Apply Hide legacy data filter
     const filteredHistory = useMemo(
         () => (hideUnknown ? history.filter(e => !!e.account_id) : history),
         [history, hideUnknown]
     );
 
-    // 隐藏的条数（让用户知道开关有意义）
+    // Hidden count so toggle is meaningful
     const hiddenCount = useMemo(
         () => history.filter(e => !e.account_id).length,
         [history]
     );
 
-    // 全局统计
+    // Global stats
     const totals = useMemo(() => {
         let req = 0, input = 0, cached = 0, output = 0, cost = 0, saved = 0;
         for (const e of filteredHistory) {
@@ -126,7 +126,7 @@ export default function CachePanel({ accounts }: Props) {
         return { req, input, cached, output, cost, saved };
     }, [filteredHistory]);
 
-    // 按账号聚合
+    // By account
     const perAccount = useMemo(() => {
         const m: Record<string, {
             id: string;
@@ -154,7 +154,7 @@ export default function CachePanel({ accounts }: Props) {
             r.cost += e.cost;
             r.saved += e.cost_saved_usd || 0;
         }
-        // unknown 永远沉到最底
+        // unknown always last
         return Object.values(m).sort((a, b) => {
             if (a.isUnknown && !b.isUnknown) return 1;
             if (!a.isUnknown && b.isUnknown) return -1;
@@ -162,7 +162,7 @@ export default function CachePanel({ accounts }: Props) {
         });
     }, [filteredHistory, accountNameById]);
 
-    // 按模型聚合（用于 bar chart：uncached / cached / output 三色）
+    // By model for bar chart
     const perModel = useMemo(() => {
         const m: Record<string, {
             model: string;
@@ -183,9 +183,9 @@ export default function CachePanel({ accounts }: Props) {
         );
     }, [filteredHistory]);
 
-    // 时间序列：按天/小时聚合 cache 命中率
+    // Time series: cache hit rate by hour
     const timeSeries = useMemo(() => {
-        // 简单按小时桶
+        // Bucket by hour
         const buckets: Record<string, { ts: number; input: number; cached: number; saved: number }> = {};
         for (const e of filteredHistory) {
             const t = new Date(e.timestamp);
@@ -206,7 +206,7 @@ export default function CachePanel({ accounts }: Props) {
     }, [filteredHistory]);
 
     if (loading) {
-        return <div className="cache-panel"><div className="cache-loading">加载中…</div></div>;
+        return <div className="cache-panel"><div className="cache-loading">Loading…</div></div>;
     }
 
     const hitRate = totals.input > 0 ? (totals.cached / totals.input) * 100 : 0;
@@ -214,55 +214,55 @@ export default function CachePanel({ accounts }: Props) {
     return (
         <div className="cache-panel">
             <div className="cache-header">
-                <h2>Prompt Cache 面板</h2>
+                <h2>Prompt Cache</h2>
                 <div className="cache-controls">
                     <select value={days} onChange={e => setDays(Number(e.target.value))}>
-                        <option value={1}>近 24 小时</option>
-                        <option value={7}>近 7 天</option>
-                        <option value={30}>近 30 天</option>
-                        <option value={90}>近 90 天</option>
+                        <option value={1}>Last 24 hours</option>
+                        <option value={7}>Last 7 days</option>
+                        <option value={30}>Last 30 days</option>
+                        <option value={90}>Last 90 days</option>
                     </select>
-                    <label className="cache-toggle" title="早期版本没记 account_id 的历史条目">
+                    <label className="cache-toggle" title="Legacy entries without account_id">
                         <input
                             type="checkbox"
                             checked={hideUnknown}
                             onChange={e => setHideUnknown(e.target.checked)}
                         />
-                        <span>隐藏旧数据{hiddenCount > 0 ? `（${hiddenCount}）` : ''}</span>
+                        <span>Hide legacy data{hiddenCount > 0 ? ` (${hiddenCount})` : ''}</span>
                     </label>
-                    <button onClick={refresh}>刷新</button>
+                    <button onClick={refresh}>Refresh</button>
                 </div>
             </div>
 
-            {/* KPI 行 */}
+            {/* KPI row */}
             <div className="cache-kpi-row">
                 <div className="kpi-tile kpi-green">
-                    <div className="kpi-label">命中率</div>
+                    <div className="kpi-label">Hit rate</div>
                     <div className="kpi-value">{hitRate.toFixed(1)}%</div>
                     <div className="kpi-sub">cached / input</div>
                 </div>
                 <div className="kpi-tile kpi-blue">
-                    <div className="kpi-label">节省</div>
+                    <div className="kpi-label">Saved</div>
                     <div className="kpi-value">{formatUsd(totals.saved)}</div>
-                    <div className="kpi-sub">vs 全价 input</div>
+                    <div className="kpi-sub">vs full input price</div>
                 </div>
                 <div className="kpi-tile kpi-purple">
-                    <div className="kpi-label">总花费</div>
+                    <div className="kpi-label">Total cost</div>
                     <div className="kpi-value">{formatUsd(totals.cost)}</div>
-                    <div className="kpi-sub">{totals.req} 次请求</div>
+                    <div className="kpi-sub">{totals.req}  requests</div>
                 </div>
                 <div className="kpi-tile kpi-orange">
-                    <div className="kpi-label">活跃 session 绑定</div>
+                    <div className="kpi-label">Active session bindings</div>
                     <div className="kpi-value">{bindings.length}</div>
                     <div className="kpi-sub">evidence-based</div>
                 </div>
             </div>
 
-            {/* 时间序列：命中率 */}
+            {/* Hit rate over time */}
             <div className="cache-card">
-                <div className="cache-card-title">命中率（按小时）</div>
+                <div className="cache-card-title">Hit rate (hourly)</div>
                 {timeSeries.length === 0 ? (
-                    <div className="cache-empty">暂无数据</div>
+                    <div className="cache-empty">No data</div>
                 ) : (
                     <ResponsiveContainer width="100%" height={220}>
                         <AreaChart data={timeSeries}>
@@ -279,11 +279,11 @@ export default function CachePanel({ accounts }: Props) {
                 )}
             </div>
 
-            {/* 按模型 bar chart */}
+            {/* Model bar chart */}
             <div className="cache-card">
-                <div className="cache-card-title">按模型 token 分布（cached vs uncached vs output）</div>
+                <div className="cache-card-title">Tokens by model (cached / uncached / output)</div>
                 {perModel.length === 0 ? (
-                    <div className="cache-empty">暂无数据</div>
+                    <div className="cache-empty">No data</div>
                 ) : (
                     <ResponsiveContainer width="100%" height={260}>
                         <BarChart data={perModel}>
@@ -303,29 +303,29 @@ export default function CachePanel({ accounts }: Props) {
                 )}
             </div>
 
-            {/* 按账号表格 */}
+            {/* By account table */}
             <div className="cache-card">
-                <div className="cache-card-title">按账号</div>
+                <div className="cache-card-title">By account</div>
                 {perAccount.length === 0 ? (
-                    <div className="cache-empty">暂无数据</div>
+                    <div className="cache-empty">No data</div>
                 ) : (
                     <table className="cache-table">
                         <thead>
                             <tr>
-                                <th>账号</th>
-                                <th>请求数</th>
+                                <th>Account</th>
+                                <th>Requests</th>
                                 <th>Input</th>
                                 <th>Cached</th>
-                                <th>命中率</th>
+                                <th>Hit rate</th>
                                 <th>Output</th>
-                                <th>花费</th>
-                                <th>节省</th>
+                                <th>Cost</th>
+                                <th>Saved</th>
                             </tr>
                         </thead>
                         <tbody>
                             {perAccount.map(a => (
                                 <tr key={a.id} className={a.isUnknown ? 'cache-row-unknown' : ''}>
-                                    <td className="cache-table-name" title={a.isUnknown ? '本字段是这次新增的，旧条目里没有，不能事后追溯' : a.id}>{a.name}</td>
+                                    <td className="cache-table-name" title={a.isUnknown ? 'New field; missing on old entries' : a.id}>{a.name}</td>
                                     <td>{a.requests}</td>
                                     <td>{formatTokens(a.input)}</td>
                                     <td className="cache-cached">{formatTokens(a.cached)}</td>
@@ -340,20 +340,20 @@ export default function CachePanel({ accounts }: Props) {
                 )}
             </div>
 
-            {/* Session 绑定表 */}
+            {/* Session bindings table */}
             <div className="cache-card">
-                <div className="cache-card-title">活跃 Session 绑定（evidence-based stickiness）</div>
+                <div className="cache-card-title">Active session bindings (evidence-based stickiness)</div>
                 {bindings.length === 0 ? (
-                    <div className="cache-empty">还没有任何 session 命中过 cache</div>
+                    <div className="cache-empty">No sessions have hit cache yet</div>
                 ) : (
                     <table className="cache-table">
                         <thead>
                             <tr>
                                 <th>Session Key</th>
-                                <th>绑定账号</th>
-                                <th>命中次数</th>
-                                <th>累计 cached tokens</th>
-                                <th>年龄</th>
+                                <th>Bound account</th>
+                                <th>Hits</th>
+                                <th>Cached tokens (total)</th>
+                                <th>Age</th>
                             </tr>
                         </thead>
                         <tbody>

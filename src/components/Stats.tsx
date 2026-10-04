@@ -142,13 +142,13 @@ export function Stats() {
             setPlanCaps(pc);
             setAccountHistory(ah);
         } catch (e) {
-            console.error('加载统计数据失败:', e);
+            console.error('Failed to load stats:', e);
         }
     };
 
     useEffect(() => { fetchData(); }, [range]);
 
-    // 聚合 token 趋势数据（按小时/天）
+    // Aggregate token trend (by hour/day)
     const trendData = (() => {
         const buckets: Record<string, { label: string; input: number; output: number; cost: number }> = {};
         for (const entry of tokenHistory) {
@@ -164,7 +164,7 @@ export function Stats() {
         return Object.values(buckets);
     })();
 
-    // 按模型分布（饼图）
+    // Model distribution (pie)
     const modelData = (() => {
         const map: Record<string, number> = {};
         for (const entry of tokenHistory) {
@@ -173,21 +173,21 @@ export function Stats() {
         return Object.entries(map).map(([name, value]) => ({ name, value }));
     })();
 
-    // 切号原因分布
+    // Switch reason distribution
     const reasonData = switchStats
         ? Object.entries(switchStats.by_reason).map(([name, value]) => ({ name, value }))
         : [];
 
     const accountCount = switchStats ? Object.keys(switchStats.by_account).length : 0;
 
-    // 分离常规切号与系统后台任务
-    const actualSwitches = switchHistory.filter(e => e.reason !== '自动刷新' && e.reason !== '后台保活');
-    const systemLogs = switchHistory.filter(e => e.reason === '自动刷新' || e.reason === '后台保活');
+    // Separate user switches from system tasks
+    const actualSwitches = switchHistory.filter(e => e.reason !== 'Auto refresh' && e.reason !== 'Background keepalive');
+    const systemLogs = switchHistory.filter(e => e.reason === 'Auto refresh' || e.reason === 'Background keepalive');
 
     return (
         <div className="stats-page">
             <div className="stats-header">
-                <h2>统计</h2>
+                <h2>Statistics</h2>
                 <div className="time-range-btns">
                     {(['day', 'week', 'month'] as TimeRange[]).map(r => (
                         <button
@@ -195,49 +195,49 @@ export function Stats() {
                             className={`range-btn ${range === r ? 'active' : ''}`}
                             onClick={() => setRange(r)}
                         >
-                            {r === 'day' ? '日' : r === 'week' ? '周' : '月'}
+                            {r === 'day' ? 'D' : r === 'week' ? 'W' : 'M'}
                         </button>
                     ))}
                 </div>
             </div>
 
-            {/* 摘要卡片 */}
+            {/* Summary cards */}
             <div className="stats-cards">
                 <div className="stat-card purple">
                     <div className="stat-card-value">{formatTokens(tokenStats?.total_tokens ?? 0)}</div>
-                    <div className="stat-card-label">Token 总量</div>
+                    <div className="stat-card-label">Total tokens</div>
                 </div>
                 <div className="stat-card yellow">
                     <div className="stat-card-value">${(tokenStats?.total_cost_usd ?? 0).toFixed(2)}</div>
-                    <div className="stat-card-label">总费用</div>
+                    <div className="stat-card-label">Total cost</div>
                 </div>
                 <div className="stat-card green">
                     <div className="stat-card-value">{switchStats?.total_count ?? 0}</div>
-                    <div className="stat-card-label">切号次数</div>
+                    <div className="stat-card-label">Switch count</div>
                 </div>
                 <div className="stat-card blue">
                     <div className="stat-card-value">{accountCount}</div>
-                    <div className="stat-card-label">使用账号数</div>
+                    <div className="stat-card-label">Accounts used</div>
                 </div>
             </div>
 
-            {/* Plan 配额上限估算（基于 quota 快照 Δpct） */}
+            {/* Plan quota ceiling estimate (quota snapshot Δpct) */}
             {planCaps.length > 0 && (() => {
                 const allPlans = Array.from(new Set(planCaps.map(p => p.plan_type))).sort();
                 return (
                     <div className="stats-section">
-                        <h3>Plan 配额上限估算（Δpct 反推，不依赖账号打满）</h3>
+                        <h3>Plan quota ceiling (Δpct inverse; no need to max account)</h3>
                         <div className="cycle-summary">
                             <div className="cycle-summary-row cycle-summary-header capacity-header">
                                 <span>Plan</span>
-                                <span className="num">5h 样本</span>
-                                <span className="num">5h 中位</span>
-                                <span className="num">5h 平均</span>
+                                <span className="num">5h samples</span>
+                                <span className="num">5h median</span>
+                                <span className="num">5h mean</span>
                                 <span className="num">5h min–max</span>
-                                <span className="num">周 样本</span>
-                                <span className="num">周 中位</span>
-                                <span className="num">周 平均</span>
-                                <span className="num">周 min–max</span>
+                                <span className="num">Weekly samples</span>
+                                <span className="num">Weekly median</span>
+                                <span className="num">Weekly mean</span>
+                                <span className="num">Weekly min–max</span>
                             </div>
                             {allPlans.map(plan => {
                                 const f = planCaps.find(p => p.plan_type === plan && p.window_type === '5h');
@@ -264,26 +264,26 @@ export function Stats() {
                             })}
                         </div>
                         <div className="cycle-hint">
-                            <b>原理</b>：每次切号前后强制抓 quota 写 `~/.codex-switcher/quota-snapshots.jsonl`。同一窗口内任意两次快照的 Δused_pct 配合期间代理 tokens → 推出该 Plan 总容量（capacity = Δtokens / Δpct × 100）。<br/>
-                            <b>中位</b>是去掉异常值后最稳的估计。Δpct&lt;3% 的样本被丢弃（used_pct 是整数，量化误差会失真）。<br/>
-                            样本会随每次切号自动累积；样本数低于 ~5 时估计仍有偏差，多用几小时即可。
+                            <b>How it works</b>: On each switch we capture quota into `~/.codex-switcher/quota-snapshots.jsonl`. Δused_pct between two snapshots in the same window plus proxy tokens in between → Plan capacity (capacity = Δtokens / Δpct × 100).<br/>
+                            <b>Median</b> is the robust estimate after dropping outliers. Samples with Δpct&lt;3% are dropped (used_pct is integer; quantization error).<br/>
+                            Samples accumulate on each switch; below ~5 samples the estimate is noisy — use for a few hours.
                         </div>
                     </div>
                 );
             })()}
 
-            {/* 每号 Token 历史（三级下钻：号 → 周期 → session） */}
+            {/* Per-account token history (account → cycle → session) */}
             {accountHistory.length > 0 && (
                 <div className="stats-section">
-                    <h3>每号 Token 历史（精确累加 + 估算上限）</h3>
+                    <h3>Per-account token history (exact sum + estimate)</h3>
                     <div className="acct-hist-table">
                         <div className="acct-hist-row acct-hist-header">
                             <span></span>
-                            <span>邮箱 / Plan</span>
-                            <span className="num">当前 5h</span>
-                            <span className="num">上次 5h</span>
-                            <span className="num">当前 周</span>
-                            <span className="num">上次 周</span>
+                            <span>Email / Plan</span>
+                            <span className="num">Current 5h</span>
+                            <span className="num">Previous 5h</span>
+                            <span className="num">Current week</span>
+                            <span className="num">Previous week</span>
                         </div>
                         {accountHistory.map(acc => {
                             const expanded = expandedAccount === acc.account_id;
@@ -298,9 +298,9 @@ export function Stats() {
                                     >
                                         <span className="acct-toggle">{expanded ? '▼' : '▶'}</span>
                                         <span className="acct-email" title={acc.email}>
-                                            {acc.is_current && <span className="quota-badge current">当前</span>}
-                                            {acc.is_banned && <span className="quota-badge banned">封</span>}
-                                            {acc.is_token_invalid && <span className="quota-badge invalid">失效</span>}
+                                            {acc.is_current && <span className="quota-badge current">Current</span>}
+                                            {acc.is_banned && <span className="quota-badge banned">Banned</span>}
+                                            {acc.is_token_invalid && <span className="quota-badge invalid">Invalid</span>}
                                             <span className={`quota-plan plan-${(acc.plan_type || 'unknown').toLowerCase()}`}>{acc.plan_type || '—'}</span>
                                             <span className="acct-email-text">{acc.email}</span>
                                         </span>
@@ -311,7 +311,7 @@ export function Stats() {
                                     </div>
                                     {expanded && (
                                         <div className="acct-hist-expand">
-                                            <div className="acct-cycle-header">5h 周期（{acc.cycles_5h.length}）</div>
+                                            <div className="acct-cycle-header">5h cycles ({acc.cycles_5h.length})</div>
                                             <CycleHistoryTable
                                                 cycles={acc.cycles_5h}
                                                 accountId={acc.account_id}
@@ -319,7 +319,7 @@ export function Stats() {
                                                 expandedCycle={expandedCycle}
                                                 setExpandedCycle={setExpandedCycle}
                                             />
-                                            <div className="acct-cycle-header">周周期（{acc.cycles_week.length}）</div>
+                                            <div className="acct-cycle-header">Weekly cycles ({acc.cycles_week.length})</div>
                                             <CycleHistoryTable
                                                 cycles={acc.cycles_week}
                                                 accountId={acc.account_id}
@@ -334,19 +334,19 @@ export function Stats() {
                         })}
                     </div>
                     <div className="cycle-hint">
-                        每格显示「<b>实测累加 / 估算上限</b>」。<br/>
-                        <b>实测累加</b> = token-history.jsonl 在该窗口内的精确求和（不平均、不打折，无论中间切号几次）。<br/>
-                        <b>估算上限</b> = `实测累加 ÷ snapshot used_pct × 100`，用快照里 used_pct 最大那个算（量化误差最小）。`?%` 标记的 used_pct 偏小，估算误差大。<br/>
-                        🔴 = 窗口内触发过限额切号 —— 此时实测累加 ≈ Plan 实际窗口配额。<br/>
-                        点开账号看历史周期，点开周期看 session 明细。
+                        Each cell shows <b>Exact sum / Estimated cap</b>.<br/>
+                        <b>Exact sum</b> = exact sum from token-history.jsonl in that window (no averaging, regardless of switches).<br/>
+                        <b>Estimated cap</b> = `Exact sum ÷ snapshot used_pct × 100` using max used_pct in snapshots (least quantization error). `?%` means used_pct was low — estimate is rough.<br/>
+                        🔴 = quota switch triggered in window — Exact sum ≈ actual Plan window quota.<br/>
+                        Expand account for cycles; expand cycle for session detail.
                     </div>
                 </div>
             )}
 
-            {/* Token 趋势图 */}
+            {/* Token trend chart */}
             {trendData.length > 0 && (
                 <div className="stats-section">
-                    <h3>Token 趋势</h3>
+                    <h3>Token trend</h3>
                     <ResponsiveContainer width="100%" height={250}>
                         <AreaChart data={trendData}>
                             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
@@ -364,11 +364,11 @@ export function Stats() {
                 </div>
             )}
 
-            {/* 下半部：费用 + 模型分布 */}
+            {/* Bottom: cost + model mix */}
             <div className="stats-grid">
                 {trendData.length > 0 && (
                     <div className="stats-section">
-                        <h3>费用趋势</h3>
+                        <h3>Cost trend</h3>
                         <ResponsiveContainer width="100%" height={200}>
                             <BarChart data={trendData}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
@@ -376,7 +376,7 @@ export function Stats() {
                                 <YAxis stroke="rgba(255,255,255,0.3)" fontSize={11} tickFormatter={v => `$${v}`} />
                                 <Tooltip
                                     contentStyle={{ background: '#1e1245', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }}
-                                    formatter={(v) => [`$${Number(v).toFixed(4)}`, '费用']}
+                                    formatter={(v) => [`$${Number(v).toFixed(4)}`, 'Cost']}
                                 />
                                 <Bar dataKey="cost" fill="#fbbf24" radius={[4, 4, 0, 0]} />
                             </BarChart>
@@ -386,7 +386,7 @@ export function Stats() {
 
                 {(modelData.length > 0 || reasonData.length > 0) && (
                     <div className="stats-section">
-                        <h3>{modelData.length > 0 ? '模型分布' : '切号原因'}</h3>
+                        <h3>{modelData.length > 0 ? 'Model mix' : 'Switch reasons'}</h3>
                         <ResponsiveContainer width="100%" height={200}>
                             <PieChart>
                                 <Pie
@@ -412,18 +412,18 @@ export function Stats() {
                 )}
             </div>
 
-            {/* 切号日志 */}
+            {/* Switch log */}
             <div className="stats-section">
-                <h3>切号日志 ({actualSwitches.length} 条)</h3>
+                <h3>Switch log ({actualSwitches.length})</h3>
                 <div className="switch-log-table">
                     <div className="log-header">
-                        <span>时间</span>
-                        <span>切换路径</span>
-                        <span>原因</span>
-                        <span>使用时长</span>
+                        <span>Time</span>
+                        <span>Path</span>
+                        <span>Reason</span>
+                        <span>Duration</span>
                     </div>
                     {actualSwitches.length === 0 ? (
-                        <div className="log-empty">暂无切号记录</div>
+                        <div className="log-empty">No switch records yet</div>
                     ) : (
                         actualSwitches.map((e, i) => (
                             <div key={i} className="log-row">
@@ -447,16 +447,16 @@ export function Stats() {
                 </div>
             </div>
 
-            {/* 后台任务日志 */}
+            {/* Background task log */}
             {systemLogs.length > 0 && (
                 <div className="stats-section">
-                    <h3>后台任务日志 ({systemLogs.length} 条)</h3>
+                    <h3>Background log ({actualSwitches.length})</h3>
                     <div className="switch-log-table">
                         <div className="log-header">
-                            <span>时间</span>
-                            <span>目标账号</span>
-                            <span>任务类型</span>
-                            <span>刷新后额度</span>
+                            <span>Time</span>
+                            <span>Target account</span>
+                            <span>Task type</span>
+                            <span>Quota after refresh</span>
                         </div>
                         {systemLogs.map((e, i) => (
                             <div key={`sys-${i}`} className="log-row">
@@ -466,7 +466,7 @@ export function Stats() {
                                 </span>
                                 <span className={`log-reason ${reasonClass(e.reason)}`}>{e.reason}</span>
                                 <span className="log-duration" style={{ color: 'var(--success-color, #10b981)' }}>
-                                    {e.to_quota_5h !== null ? `${e.to_quota_5h}%` : '成功'}
+                                    {e.to_quota_5h !== null ? `${e.to_quota_5h}%` : 'OK'}
                                 </span>
                             </div>
                         ))}
@@ -493,8 +493,8 @@ function formatWindow(startSec: number, endSec: number): string {
     return `${fmtDate(s)} ${fmtTime(s)} → ${fmtDate(e)} ${fmtTime(e)}`;
 }
 
-/// 顶层一格：「实测累加 / 估算上限」
-/// null 也用 cell-pair 双行结构，保证上下与有数据的格子严格对齐。
+/// Top cell: Exact sum / Estimated cap
+/// null uses same two-row cell-pair for alignment
 function CellPair({ cycle }: { cycle: CycleDetail | null }) {
     if (!cycle) {
         return (
@@ -514,8 +514,8 @@ function CellPair({ cycle }: { cycle: CycleDetail | null }) {
                 {cycle.hit_limit && <span className="cell-fire">🔴</span>}
                 {formatTokens(cycle.total_tokens)}
             </span>
-            <span className="cell-est" title={pct != null ? `quota snapshot used_pct=${pct}% · 窗口 ${formatWindow(cycle.window_start, cycle.window_end)}` : `窗口 ${formatWindow(cycle.window_start, cycle.window_end)}`}>
-                {isFallback && <span className="cell-fallback-tag">最近</span>}
+            <span className="cell-est" title={pct != null ? `quota snapshot used_pct=${pct}% · window ${formatWindow(cycle.window_start, cycle.window_end)}` : `window ${formatWindow(cycle.window_start, cycle.window_end)}`}>
+                {isFallback && <span className="cell-fallback-tag">Latest</span>}
                 {cap != null
                     ? `~${formatTokens(cap)}${lowConfidence ? '?' : ''}`
                     : (isFallback ? <>&nbsp;</> : ' ')}
@@ -524,7 +524,7 @@ function CellPair({ cycle }: { cycle: CycleDetail | null }) {
     );
 }
 
-/// 周期列表（5h 或周）。点开一行看 session 明细。
+/// Cycle list (5h or week). Expand row for sessions.
 function CycleHistoryTable({
     cycles,
     accountId,
@@ -539,19 +539,19 @@ function CycleHistoryTable({
     setExpandedCycle: (k: string | null) => void;
 }) {
     if (cycles.length === 0) {
-        return <div className="acct-empty">无数据</div>;
+        return <div className="acct-empty">No data</div>;
     }
     return (
         <div className="hist-cycle-table">
             <div className="hist-cycle-row hist-cycle-header">
                 <span></span>
-                <span>窗口</span>
-                <span className="num">实测累加</span>
-                <span className="num">估算上限</span>
+                <span>Window</span>
+                <span className="num">Exact sum</span>
+                <span className="num">Estimated cap</span>
                 <span className="num">used_pct</span>
-                <span className="num">轮数</span>
-                <span className="num">session 数</span>
-                <span>状态</span>
+                <span className="num">Rounds</span>
+                <span className="num">Sessions</span>
+                <span>Status</span>
             </div>
             {cycles.map(c => {
                 const key = `${accountId}-${windowLabel}-${c.window_end}`;
@@ -562,10 +562,10 @@ function CycleHistoryTable({
                         ? 'limit-hit'
                         : '';
                 const statusLabel = c.is_current
-                    ? '进行中'
+                    ? 'In progress'
                     : c.hit_limit
-                        ? `🔴 ${c.last_switch_reason ?? '限额'}`
-                        : '正常';
+                        ? `🔴 ${c.last_switch_reason ?? 'Quota'}`
+                        : 'OK';
                 return (
                     <div key={key}>
                         <div
@@ -591,9 +591,9 @@ function CycleHistoryTable({
                             <div className="hist-session-table">
                                 <div className="hist-session-row hist-session-header">
                                     <span>Session</span>
-                                    <span className="num">轮数</span>
+                                    <span className="num">Rounds</span>
                                     <span className="num">Token</span>
-                                    <span>首次 → 末次</span>
+                                    <span>First → last</span>
                                 </div>
                                 {c.sessions.map((s, idx) => (
                                     <div key={idx} className="hist-session-row">
@@ -615,10 +615,10 @@ function CycleHistoryTable({
 }
 
 function reasonClass(reason: string): string {
-    if (reason.includes('手动')) return 'manual';
-    if (reason.includes('429') || reason.includes('限额')) return 'ratelimit';
-    if (reason.includes('封号')) return 'banned';
-    if (reason.includes('保活')) return 'keepalive';
-    if (reason.includes('刷新')) return 'refresh';
+    if (reason.includes('Manual')) return 'manual';
+    if (reason.includes('429') || reason.includes('Quota')) return 'ratelimit';
+    if (reason.includes('Banned')) return 'banned';
+    if (reason.includes('Keepalive')) return 'keepalive';
+    if (reason.includes('Refresh')) return 'refresh';
     return 'auto';
 }
