@@ -1945,6 +1945,8 @@ struct QuotaRefreshTarget {
 
 /// Plus 的 5h 窗口回满后立即切过去，不依赖下一次请求触发 429 或其它选号信号。
 /// 额度刷新循环每轮调用一次；只对已确认可用的 Plus 生效，避免把周限额耗尽的号切进来。
+const PLUS_WATCH_CURRENT_FLOOR: f64 = 5.0;
+
 fn switch_to_ready_plus_if_needed(
     store: &std::sync::Arc<std::sync::Mutex<AccountStore>>,
     app_handle: &tauri::AppHandle,
@@ -1955,6 +1957,37 @@ fn switch_to_ready_plus_if_needed(
             Err(_) => return,
         };
         let current_id = s.current.clone();
+        // Drain-first: never leave an account that still has usable quota just
+        // because another Plus account refilled. Only move when the current one
+        // is unusable or nearly empty.
+        let now_ts = chrono::Utc::now().timestamp();
+        let current_usable = current_id
+            .as_ref()
+            .and_then(|id| s.accounts.get(id))
+            .map(|a| {
+                !a.is_banned
+                    && !a.is_token_invalid
+                    && !a.is_logged_out
+                    && a.cached_quota.as_ref().map_or(true, |q| {
+                        let five = effective_window_left(
+                            q.five_hour_left,
+                            q.five_hour_reset_at,
+                            q.updated_at.timestamp(),
+                            now_ts,
+                        );
+                        let weekly = effective_window_left(
+                            q.weekly_left,
+                            q.weekly_reset_at,
+                            q.updated_at.timestamp(),
+                            now_ts,
+                        );
+                        five.min(weekly) > PLUS_WATCH_CURRENT_FLOOR
+                    })
+            })
+            .unwrap_or(false);
+        if current_usable {
+            return;
+        }
         let target = s
             .accounts
             .values()
@@ -3080,6 +3113,15 @@ pub fn start_quota_refresh(
     })
 }
 
+/// Remaining percentage of a rate-limit window, assuming it refilled if its reset
+/// time passed after the cached reading was taken.
+fn effective_window_left(left: f64, reset_at: Option<i64>, cached_at: i64, now: i64) -> f64 {
+    match reset_at {
+        Some(reset) if now >= reset && cached_at < reset => 100.0,
+        _ => left.max(0.0),
+    }
+}
+
 pub fn score_candidate_accounts(store: &AccountStore) -> Vec<(String, String, f64)> {
     let current_id = store.current.as_deref().unwrap_or("");
     let allow_free = store.settings.allow_auto_switch_to_free;
@@ -3121,41 +3163,42 @@ pub fn score_candidate_accounts(store: &AccountStore) -> Vec<(String, String, f6
                     _ => 10.0,
                 };
 
-                // 5h 可用度
-                let five_h = if q.five_hour_left <= 0.0 {
-                    match q.five_hour_reset_at {
-                        Some(reset_at) if now >= reset_at => 50.0,
-                        _ => 0.0,
-                    }
-                } else {
-                    q.five_hour_left
-                };
-
-                // 周可用度
-                let weekly = if q.weekly_left <= 0.0 {
-                    match q.weekly_reset_at {
-                        Some(reset_at) if now >= reset_at => 50.0,
-                        _ => 0.0,
-                    }
-                } else {
-                    q.weekly_left
-                };
+                // Drain-first, reset-aware scoring.
+                // A window whose reset time has passed since the cache was taken is
+                // treated as refilled, so an account that was empty comes back as a
+                // candidate without needing a fresh quota fetch.
+                let five_h = effective_window_left(
+                    q.five_hour_left,
+                    q.five_hour_reset_at,
+                    q.updated_at.timestamp(),
+                    now,
+                );
+                let weekly = effective_window_left(
+                    q.weekly_left,
+                    q.weekly_reset_at,
+                    q.updated_at.timestamp(),
+                    now,
+                );
 
                 let effective = if is_free { five_h } else { five_h.min(weekly) };
                 if effective <= 0.0 {
                     continue;
                 }
-                // Plus 的 5h 窗口一旦回满，优先把它用起来，避免在其它订阅号上
-                // 白白消耗额度。这个是硬优先级，不再让 Pro 的 plan_bonus 压过满额 Plus。
-                // 仍保留 weekly > 0 的前置过滤：周限额已耗尽的 Plus 不是可用候选。
-                let full_plus_bonus = if plan == "plus" && q.five_hour_left >= 100.0 {
-                    1_000_000.0
-                } else {
-                    0.0
-                };
 
-                // 最终评分 = 满额 Plus 硬优先级 + 额度分 + Plan 加分
-                full_plus_bonus + effective + plan_bonus
+                // Spend the account whose weekly window resets soonest first, so
+                // unused weekly quota is not thrown away; accounts that just reset
+                // (weekly nearly full, reset days away) are saved for later.
+                let hours_to_weekly_reset = q
+                    .weekly_reset_at
+                    .map(|r| ((r - now).max(0) as f64) / 3600.0)
+                    .unwrap_or(168.0);
+                let urgency = (1.0 - hours_to_weekly_reset / 168.0).clamp(0.0, 1.0) * 100.0;
+
+                // Do not move onto an account that is about to run dry itself.
+                let nearly_empty_penalty = if five_h < 10.0 { 60.0 } else { 0.0 };
+
+                // Score = weekly urgency + a little 5h headroom + plan bonus - penalty
+                urgency + five_h * 0.25 + plan_bonus - nearly_empty_penalty
             }
         };
 
@@ -6794,45 +6837,90 @@ mod tests {
         assert!(err.contains("过期"));
     }
 
-    #[test]
-    fn full_plus_is_selected_before_a_higher_quota_pro_account() {
-        let now = Utc::now();
-        let mut store = AccountStore::default();
-        store.current = Some("current".to_string());
-        let quota = |plan_type: &str| account::CachedQuota {
-            five_hour_left: 100.0,
+    fn drain_quota(
+        now: chrono::DateTime<Utc>,
+        five_left: f64,
+        five_reset_in: i64,
+        weekly_left: f64,
+        weekly_reset_in: i64,
+        updated_ago: i64,
+    ) -> account::CachedQuota {
+        account::CachedQuota {
+            five_hour_left: five_left,
             five_hour_reset: "".to_string(),
-            five_hour_reset_at: Some(now.timestamp() + 3600),
+            five_hour_reset_at: Some(now.timestamp() + five_reset_in),
             primary_window_seconds: Some(5 * 3600),
             five_hour_label: "5H".to_string(),
-            weekly_left: 100.0,
+            weekly_left,
             weekly_reset: "".to_string(),
-            weekly_reset_at: Some(now.timestamp() + 7 * 24 * 3600),
+            weekly_reset_at: Some(now.timestamp() + weekly_reset_in),
             secondary_window_seconds: Some(7 * 24 * 3600),
             weekly_label: "7D".to_string(),
-            plan_type: plan_type.to_string(),
+            plan_type: "plus".to_string(),
             is_valid_for_cli: true,
             reset_credits: None,
             spark: None,
             luna_reserve: None,
-            updated_at: now,
-        };
+            updated_at: now - chrono::Duration::seconds(updated_ago),
+        }
+    }
 
-        let mut plus = test_account("plus", "plus-account", "rt-plus");
-        plus.id = "plus".to_string();
-        plus.cached_quota = Some(quota("plus"));
+    fn store_with(accounts: Vec<(&str, account::CachedQuota)>) -> AccountStore {
+        let mut store = AccountStore::default();
+        store.current = Some("current".to_string());
+        for (id, quota) in accounts {
+            let mut a = test_account(id, id, "rt");
+            a.id = id.to_string();
+            a.cached_quota = Some(quota);
+            store.accounts.insert(a.id.clone(), a);
+        }
+        store
+    }
 
-        let mut pro = test_account("pro", "pro-account", "rt-pro");
-        pro.id = "pro".to_string();
-        pro.cached_quota = Some(quota("pro"));
+    #[test]
+    fn soonest_weekly_reset_is_drained_first() {
+        let now = Utc::now();
+        let day = 24 * 3600;
+        let store = store_with(vec![
+            ("fresh", drain_quota(now, 100.0, 3600, 100.0, 6 * day, 0)),
+            ("expiring", drain_quota(now, 60.0, 3600, 40.0, day, 0)),
+        ]);
+        let c = score_candidate_accounts(&store);
+        assert_eq!(c.first().map(|x| x.0.as_str()), Some("expiring"));
+    }
 
-        store.accounts.insert(plus.id.clone(), plus);
-        store.accounts.insert(pro.id.clone(), pro);
+    #[test]
+    fn account_with_passed_5h_reset_returns_as_candidate() {
+        let now = Utc::now();
+        let day = 24 * 3600;
+        // cached as empty an hour ago; its 5h window reset 10 minutes ago
+        let store = store_with(vec![
+            ("a", drain_quota(now, 0.0, -600, 70.0, 2 * day, 3600)),
+            ("b", drain_quota(now, 50.0, 3600, 90.0, 5 * day, 0)),
+        ]);
+        let c = score_candidate_accounts(&store);
+        assert_eq!(c.first().map(|x| x.0.as_str()), Some("a"));
+    }
 
-        let candidates = score_candidate_accounts(&store);
-        assert_eq!(
-            candidates.first().map(|candidate| candidate.0.as_str()),
-            Some("plus")
-        );
+    #[test]
+    fn nearly_empty_account_is_not_preferred() {
+        let now = Utc::now();
+        let day = 24 * 3600;
+        let store = store_with(vec![
+            ("low", drain_quota(now, 4.0, 3600, 50.0, day, 0)),
+            ("ok", drain_quota(now, 60.0, 3600, 60.0, 3 * day, 0)),
+        ]);
+        let c = score_candidate_accounts(&store);
+        assert_eq!(c.first().map(|x| x.0.as_str()), Some("ok"));
+    }
+
+    #[test]
+    fn exhausted_account_with_future_reset_is_skipped() {
+        let now = Utc::now();
+        let store = store_with(vec![(
+            "empty",
+            drain_quota(now, 0.0, 3600, 50.0, 24 * 3600, 0),
+        )]);
+        assert!(score_candidate_accounts(&store).is_empty());
     }
 }
