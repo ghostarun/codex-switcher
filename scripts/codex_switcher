@@ -18,10 +18,10 @@ def col(s, c):
     return f"\033[{c}m{s}\033[0m" if TTY else s
 
 def bar(used, w=20):
-    used = max(0, min(100, used))
-    n = round(w * used / 100)
-    c = "32" if used < 60 else "33" if used < 85 else "31"
-    return col("█" * n + "░" * (w - n), c) + f" {used:3.0f}%"
+    left = 100 - max(0, min(100, used))
+    n = round(w * left / 100)
+    c = "32" if left > 40 else "33" if left > 15 else "31"
+    return col("█" * n + "░" * (w - n), c) + f" {left:3.0f}% left"
 
 def fmt_dur(sec):
     if sec <= 0: return "now"
