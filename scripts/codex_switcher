@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""codex_switcher usage — show 5h/weekly limits for all Codex accounts + Claude.
+
+Read-only: Codex data comes from the cached quota in ~/.codex-switcher/accounts.json
+(kept fresh by the running Codex Switcher app); Claude data comes from the
+Anthropic OAuth usage endpoint using the token in ~/.claude/.credentials.json.
+Tokens are never refreshed or written.
+"""
+import json, os, re, sys, time, urllib.request
+from datetime import datetime, timezone
+
+CS = os.path.expanduser("~/.codex-switcher/accounts.json")
+CL = os.path.expanduser("~/.claude/.credentials.json")
+TTY = sys.stdout.isatty() and "NO_COLOR" not in os.environ
+
+def col(s, c):
+    return f"\033[{c}m{s}\033[0m" if TTY else s
+
+def bar(used, w=20):
+    used = max(0, min(100, used))
+    n = round(w * used / 100)
+    c = "32" if used < 60 else "33" if used < 85 else "31"
+    return col("█" * n + "░" * (w - n), c) + f" {used:3.0f}%"
+
+def fmt_dur(sec):
+    if sec <= 0: return "now"
+    d, r = divmod(int(sec), 86400); h, r = divmod(r, 3600); m = r // 60
+    return f"{d}d{h:02d}h" if d else f"{h}h{m:02d}m" if h else f"{m}m"
+
+def row(label, used, reset_ts):
+    rst = f"resets in {fmt_dur(reset_ts - time.time())}" if reset_ts else ""
+    return f"    {label:<7}{bar(used)}  {rst}"
+
+def codex():
+    try:
+        d = json.load(open(CS))
+    except Exception as e:
+        print(f"Codex: cannot read {CS}: {e}"); return
+    cur = d.get("current")
+    print(col("Codex accounts", "1"))
+    accts = d.get("accounts", [])
+    for a in (accts.values() if isinstance(accts, dict) else accts):
+        q = a.get("cached_quota") or {}
+        flags = []
+        if a.get("id") == cur: flags.append("active")
+        if a.get("is_banned"): flags.append("BANNED")
+        if a.get("is_token_invalid") or a.get("is_logged_out"): flags.append("needs login")
+        age = None
+        if q.get("updated_at"):
+            t = datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", q["updated_at"]).replace("Z", "+00:00"))
+            age = (datetime.now(timezone.utc) - t).total_seconds()
+            if age > 900: flags.append(f"stale {fmt_dur(age)}")
+        plan = q.get("plan_type", "?")
+        print(f"  {a.get('name','?')} [{plan}]" + (f"  ({', '.join(flags)})" if flags else ""))
+        if q.get("five_hour_left") is None:
+            print("    no quota data yet"); continue
+        h5r, wr = q.get("five_hour_reset_at"), q.get("weekly_reset_at")
+        print(row("5h", 100 - q["five_hour_left"], h5r if (h5r or 0) > time.time() else None))
+        print(row("weekly", 100 - q["weekly_left"], wr if (wr or 0) > time.time() else None))
+
+def claude():
+    print(col("Claude", "1"))
+    try:
+        c = json.load(open(CL))["claudeAiOauth"]
+    except Exception as e:
+        print(f"  cannot read credentials: {e}"); return
+    if c["expiresAt"] / 1000 < time.time():
+        print("  token expired — run `claude` once to refresh, then retry"); return
+    req = urllib.request.Request(
+        "https://api.anthropic.com/api/oauth/usage",
+        headers={"Authorization": "Bearer " + c["accessToken"],
+                 "anthropic-beta": "oauth-2025-04-20", "User-Agent": "claude-code/2.0"})
+    try:
+        u = json.load(urllib.request.urlopen(req, timeout=15))
+    except Exception as e:
+        print(f"  usage request failed: {e}"); return
+    print(f"  {c.get('subscriptionType','?')} plan")
+    def ts(w):
+        return datetime.fromisoformat(w["resets_at"]).timestamp() if w.get("resets_at") else None
+    for key, label in (("five_hour", "5h"), ("seven_day", "weekly"),
+                       ("seven_day_opus", "opus"), ("seven_day_sonnet", "sonnet")):
+        w = u.get(key)
+        if w and w.get("utilization") is not None:
+            print(row(label, w["utilization"], ts(w)))
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] != "usage":
+        print("usage: codex_switcher usage"); sys.exit(2)
+    codex(); print(); claude()
+
+main()
