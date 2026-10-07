@@ -155,3 +155,51 @@ has instead.)
   but git history is the better long-term record.
 - Upstream `docs/` is gitignored and was left as it was in the working tree.
 - `proxy.rs` and `lib.rs` are very large; prefer small, targeted edits and keep `cargo test` green.
+
+## Personal two-PC activity (0.7.16, protocol 1)
+
+Pairing is optional and limited to this PC plus one authenticated Tailscale peer.
+The UI has a Two-PC section in Settings and a live status panel. The terminal
+command `codex_switcher active` shows both PCs, selected defaults, actual open
+connections, last completed requests and tool versions. Actual existing
+connections take precedence over the machine priority; ThinkStation's primary
+flag is only an idle/simultaneous-start tiebreak. Automatic separation updates
+the default pointer without disconnecting in-flight sessions. Explicit session
+routes and existing affinity remain authoritative. Sharing is a fallback when
+no healthy, permitted account with usable quota is available. Network partitions
+fail open; this is not an exclusive distributed lease.
+
+The activity listener binds only the local Tailscale IPv4 on 18082, authenticates
+one peer IP plus a 32+ character pairing secret, and never sends credentials or
+prompts. Status polling is every five seconds with a 20-second local receipt TTL;
+new unbound requests fetch fresh activity before choosing their default. Live
+WebSocket counts include idle reusable connections. Shared copied OAuth grants
+still require the existing single token-authority server/client setup; pairing
+is not a token synchronization service. Paired clients retain independent current
+pointers and perform account selection locally even when quota retries are needed.
+
+Build on each machine to avoid Linux ABI/library differences:
+
+```bash
+npm ci
+npm run build
+(cd src-tauri && cargo build --release --locked)
+# After handing off work and quitting Switcher:
+python3 scripts/install-personal-build.py \
+  --binary src-tauri/target/release/codex-switcher \
+  --peer-ip 100.95.7.78 \
+  --secret-file ~/.codex-switcher/two-pc-secret
+```
+
+On Legion use `--peer-ip 100.104.44.67`. Transfer the same secret file privately
+between the two PCs before the second installation; independently generated
+secrets will not authenticate. The installer preserves the old binary/account
+store, installs the underscore terminal command and a desktop-safe browser opener,
+and writes sanitized build/checksum metadata. It refuses to kill a running app.
+Start `codex-switcher` afterward. If the T3 tray needed the new user launcher,
+restart T3 only after safe handoff; the installer adds its documented environment
+overrides to the existing personal launcher.
+
+DentoBot personal check: `python3 Workspace/scripts/personal-tools-check.py --latest`
+from the active DentoBot checkout. This checks only ThinkStation P3 and Linux
+Legion, never lab/robotics compatibility.

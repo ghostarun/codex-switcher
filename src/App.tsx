@@ -20,6 +20,7 @@ import CachePanel from './components/CachePanel';
 import { ConfirmModal } from './components/ConfirmModal';
 import { RelayImportConfirm } from './components/RelayImportConfirm';
 import './App.css';
+import { TwoPcActivity } from './components/TwoPcActivity';
 
 type PageType = 'dashboard' | 'accounts' | 'proxy' | 'routes' | 'stats' | 'cache' | 'skills' | 'settings';
 
@@ -424,6 +425,7 @@ function App() {
       )}
 
       <main className="app-main">
+        <TwoPcActivity />
         {currentPage === 'dashboard' ? (
           <Dashboard
             accounts={accounts}

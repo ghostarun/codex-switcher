@@ -81,7 +81,7 @@ def codex(live=True):
             q = {**q, **lq, "updated_at": None}
         elif live:
             flags.append(f"live failed: {lerr}, showing cached")
-        if a.get("id") == cur: flags.append("active")
+        if a.get("id") == cur: flags.append("selected")
         if a.get("is_banned"): flags.append("BANNED")
         if a.get("is_token_invalid") or a.get("is_logged_out"): flags.append("needs login")
         age = None
@@ -135,8 +135,42 @@ def ago(iso):
     t = datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", iso).replace("Z", "+00:00"))
     return fmt_dur((datetime.now(timezone.utc) - t).total_seconds()) + " ago"
 
+def two_pc_status():
+    path = os.path.expanduser("~/.codex-switcher/two-pc-activity.json")
+    try:
+        d = json.load(open(path))
+        if time.time() - os.stat(path).st_mtime > 20:
+            print("Two-PC activity: stale (Switcher stopped or heartbeat unavailable)")
+            return None
+    except (OSError, ValueError):
+        return None
+    if not d.get("enabled"):
+        return None
+    print(col("Two-PC activity", "1"))
+    for key in ("local", "peer"):
+        n = d.get(key)
+        if not n:
+            print(f"  Other PC ({d.get('peer_ip', '?')}): " + ("Tailscale online; Switcher activity unavailable" if d.get("peer_online") else "offline"))
+            continue
+        selected = (n.get("selected") or {}).get("name", "none")
+        served = (n.get("last_served") or {}).get("name", "none recorded since startup")
+        when = datetime.fromtimestamp(n["last_request_at"]).astimezone().isoformat(timespec="seconds") if n.get("last_request_at") else ""
+        print(f"  {n.get('name', '?')} ({n.get('ip', '?')})" + (" [this PC]" if key == "local" else "") + (" [idle tie preference]" if n.get("primary") else ""))
+        print(f"    Proxy: {'running' if n.get('proxy_running') else 'stopped'} · selected: {selected}")
+        live = ", ".join(f"{a['account']['name']} ({a['connections']} connections)" for a in n.get("live_accounts", []))
+        print(f"    Live connections: {live or 'none'}")
+        print(f"    Last served: {served} {when}")
+        print(f"    Switcher {n.get('switcher_version', '?')} · T3 Personal {n.get('t3_version') or 'not detected'}")
+    if d.get("sharing"):
+        print("  Sharing an account; separate accounts preferred when alternatives are usable")
+    if d.get("error"):
+        print("  " + d["error"])
+    print()
+    return d
+
 def active():
     import socket, subprocess
+    two_pc_status()
     d = json.load(open(CS))
     accts = d.get("accounts", [])
     accts = list(accts.values() if isinstance(accts, dict) else accts)
@@ -151,9 +185,9 @@ def active():
     cur = by_id.get(d.get("current"))
     if last and last["account_id"] in by_id:
         a = by_id[last["account_id"]]
-        print(f"  In use now:  {col(a['name'], '1;32')}  (last request {ago(last['timestamp'])}, {last['model']})")
+        print(f"  Last served:  {col(a['name'], '1;32')}  (last request {ago(last['timestamp'])}, {last['model']})")
         if cur and cur["id"] != a["id"]:
-            print(f"  Selected next: {cur['name']}  (app switched since that request)")
+            print(f"  Selected now: {cur['name']}  (app switched since that request)")
     elif cur:
         print(f"  Selected:    {col(cur['name'], '1;32')}  (no requests recorded yet)")
     sw = (tail_json(os.path.expanduser("~/.codex-switcher/switch-history.jsonl")) or [None])[-1]

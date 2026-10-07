@@ -139,6 +139,18 @@ pub struct AppSettings {
     #[serde(default = "default_true")]
     pub solo_auto_sync_current: bool,
 
+    /// At most one paired PC; activity stays on authenticated Tailscale endpoints.
+    #[serde(default)]
+    pub two_pc_enabled: bool,
+    #[serde(default)]
+    pub two_pc_peer_ip: String,
+    #[serde(default)]
+    pub two_pc_secret: String,
+    #[serde(default = "default_true")]
+    pub two_pc_prefer_separate: bool,
+    #[serde(default)]
+    pub two_pc_primary: bool,
+
     /// SSE bootstrap 的缓冲字节上限（拦截 mid-stream 限额错误的窗口大小）。
     /// 正常请求几 KB 就过窗，配大点不会有副作用，反而能在慢启动模型上有更多嗅探机会。
     #[serde(default = "default_bootstrap_byte_cap")]
@@ -298,6 +310,11 @@ impl Default for AppSettings {
             current_relay_accounts: HashMap::new(),
             skills_sync_blacklist: Vec::new(),
             solo_auto_sync_current: true,
+            two_pc_enabled: false,
+            two_pc_peer_ip: String::new(),
+            two_pc_secret: String::new(),
+            two_pc_prefer_separate: true,
+            two_pc_primary: false,
             proxy_bootstrap_byte_cap: default_bootstrap_byte_cap(),
             proxy_bootstrap_time_cap_ms: default_bootstrap_time_cap_ms(),
             relay_auto_switch_out: true,

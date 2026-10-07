@@ -596,6 +596,7 @@ async fn resolve_token_with_affinity(
     session_key: Option<&str>,
 ) -> Result<(String, bool, Option<String>, bool), String> {
     let Some(sk) = session_key else {
+        crate::two_pc::prepare_default(&state.store, &state.app_handle).await;
         let (tok, is_cgpt) = get_current_token(state).await?;
         let cur = state.store.lock().ok().and_then(|s| s.current.clone());
         return Ok((tok, is_cgpt, cur, false));
@@ -691,7 +692,7 @@ async fn resolve_token_with_affinity(
                 .unwrap_or(false)
         });
         match bid {
-            Some(id) if Some(&id) != cur.as_ref() => {
+            Some(id) => {
                 let bound_is_relay = store
                     .accounts
                     .get(&id)
@@ -725,6 +726,7 @@ async fn resolve_token_with_affinity(
         return Ok((token, is_chatgpt, Some(account_id), false));
     }
 
+    crate::two_pc::prepare_default(&state.store, &state.app_handle).await;
     let (tok, is_cgpt) = get_current_token(state).await?;
     let cur = state.store.lock().ok().and_then(|s| s.current.clone());
     Ok((tok, is_cgpt, cur, false))
@@ -4003,6 +4005,11 @@ async fn handle_request(
     Ok(resp)
 }
 
+fn remote_selects_current(state: &ProxyState) -> bool {
+    state.store.lock().map(|s| s.settings.remote_mode == "client"
+        && !s.settings.client_owns_current && !s.settings.two_pc_enabled).unwrap_or(false)
+}
+
 /// client 模式：让 Server 仲裁切号，然后用新 token 重试
 async fn try_remote_switch_and_retry(
     state: &ProxyState,
@@ -5242,11 +5249,6 @@ async fn dispatch_quota_switch_retry(
     session_key: Option<&str>,
     reason: SwitchReason,
 ) -> Option<Response<ProxyBody>> {
-    let remote_mode = state
-        .store
-        .lock()
-        .map(|s| s.settings.remote_mode.clone())
-        .unwrap_or_default();
 
     let remote_label = match &reason {
         SwitchReason::Http429 => "http_429",
@@ -5255,7 +5257,7 @@ async fn dispatch_quota_switch_retry(
         _ => "http_429",
     };
 
-    if remote_mode == "client" {
+    if remote_selects_current(state) {
         if state
             .switching
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -5535,13 +5537,7 @@ async fn acquire_replacement_upstream(
     body: &Bytes,
     reason: SwitchReason,
 ) -> Option<ByteStream> {
-    let remote_mode = state
-        .store
-        .lock()
-        .map(|s| s.settings.remote_mode.clone())
-        .unwrap_or_default();
-
-    if remote_mode == "client" {
+    if remote_selects_current(state) {
         let (current_id, primary, fallback, secret) = {
             let s = state.store.lock().ok()?;
             (
@@ -6121,7 +6117,8 @@ fn build_stream_response_from_parts(
     })
     .filter(|_| futures_util::future::ready(false));
 
-    let combined = stream.chain(end_signal);
+    let guard=crate::two_pc::begin(affinity_ctx.as_ref().map(|c|c.account_id.as_str()).unwrap_or(""));
+    let combined = stream.chain(end_signal).map(move |frame| { let _=&guard; frame });
 
     builder
         .body(BodyExt::boxed_unsync(StreamBody::new(combined)))
@@ -6156,6 +6153,8 @@ async fn handle_websocket(
         .get("originator")
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.eq_ignore_ascii_case("Codex Desktop"));
+    // New connections can change the default; existing bridges keep their captured identity.
+    crate::two_pc::prepare_default(&state.store, &state.app_handle).await;
     // 1. 获取 token 和上游地址
     let (mut token, mut is_chatgpt) = match get_current_token(&state).await {
         Ok(t) => t,
@@ -6653,6 +6652,10 @@ async fn handle_websocket(
         .body(full_body(Bytes::new()))
         .unwrap_or_else(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to build 101 response"));
 
+    let ws_account_id = state.store.lock().ok().and_then(|s| s.accounts.values()
+        .find(|a| AccountStore::extract_access_token(&a.auth_json).as_deref()==Some(token.as_str()))
+        .map(|a|a.id.clone())).unwrap_or_default();
+    let activity_guard=crate::two_pc::begin(&ws_account_id);
     // 7. 后台任务：upgrade 完成后双向桥接
     let disconnect = state.ws_disconnect.clone();
     tokio::spawn(async move {
@@ -6683,7 +6686,7 @@ async fn handle_websocket(
                     println!("[Proxy] 已注入切号通知到 WebSocket");
                 }
 
-                bridge_websockets(client_ws, upstream_ws, disconnect, state, codex_desktop).await;
+                bridge_websockets(client_ws, upstream_ws, disconnect, state, codex_desktop, ws_account_id, activity_guard).await;
                 println!("[Proxy] WebSocket 连接已关闭");
             }
             Err(e) => eprintln!("[Proxy] WebSocket upgrade 失败: {}", e),
@@ -7017,6 +7020,8 @@ async fn bridge_websockets<S1, S2>(
     disconnect: Arc<tokio::sync::Notify>,
     state: Arc<ProxyState>,
     codex_desktop: bool,
+    ws_account_id: String,
+    activity_guard: crate::two_pc::ActivityGuard,
 ) where
     S1: futures_util::Stream<Item = Result<tungstenite::Message, tungstenite::Error>>
         + futures_util::Sink<tungstenite::Message, Error = tungstenite::Error>
@@ -7057,10 +7062,12 @@ async fn bridge_websockets<S1, S2>(
         .unwrap_or(false)
     {
         drop(upstream);
+        drop(activity_guard);
         bridge_antigravity_websocket(client, pending, state, detected_model).await;
         return;
     }
 
+    let _activity_guard=activity_guard;
     let (mut client_write, mut client_read) = client.split();
     let (mut upstream_write, mut upstream_read) = upstream.split();
 
@@ -7306,12 +7313,7 @@ async fn bridge_websockets<S1, S2>(
                             if let Some(mut usage) =
                                 crate::token_tracker::extract_usage_from_sse(wrapped.as_bytes(), "")
                             {
-                                let cur_id = state_clone
-                                    .store
-                                    .lock()
-                                    .ok()
-                                    .and_then(|s| s.current.clone())
-                                    .unwrap_or_default();
+                                let cur_id = ws_account_id.clone();
                                 let cache_pct = if usage.input_tokens > 0 {
                                     (usage.cached_input_tokens as f64 / usage.input_tokens as f64)
                                         * 100.0

@@ -25,6 +25,11 @@ interface AppSettings {
     remote_server_url_fallback: string;
     remote_shared_secret: string;
     solo_auto_sync_current: boolean;
+    two_pc_enabled: boolean;
+    two_pc_peer_ip: string;
+    two_pc_secret: string;
+    two_pc_prefer_separate: boolean;
+    two_pc_primary: boolean;
     proxy_bootstrap_byte_cap: number;
     proxy_bootstrap_time_cap_ms: number;
     relay_auto_switch_out: boolean;
@@ -74,6 +79,11 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
         remote_server_url_fallback: '',
         remote_shared_secret: '',
         solo_auto_sync_current: true,
+        two_pc_enabled: false,
+        two_pc_peer_ip: '',
+        two_pc_secret: '',
+        two_pc_prefer_separate: true,
+        two_pc_primary: false,
         proxy_bootstrap_byte_cap: 32 * 1024,
         proxy_bootstrap_time_cap_ms: 8000,
         relay_auto_switch_out: true,
@@ -527,6 +537,21 @@ export function Settings({ accounts = [], onSetSessionAnchor }: SettingsProps = 
 
             <div className="settings-section">
                 <h3><Radio size={16} /> Remote Mode (LAN sync)</h3>
+
+                <div className="setting-item">
+                    <div className="setting-info">
+                        <span className="setting-label">Two-PC activity over Tailscale</span>
+                        <span className="setting-desc">Pair this PC with exactly one other PC. No account tokens or project contents are exchanged.</span>
+                    </div>
+                    <input type="checkbox" checked={settings.two_pc_enabled} onChange={e => updateField('two_pc_enabled', e.target.checked)} />
+                </div>
+                {settings.two_pc_enabled && <>
+                    <div className="setting-item"><label>Other PC's Tailscale IPv4</label><input className="text-input" value={settings.two_pc_peer_ip} onChange={e => updateField('two_pc_peer_ip', e.target.value.trim())} placeholder="100.95.7.78" /></div>
+                    <div className="setting-item"><label>Pairing secret (same on both PCs, at least 32 characters)</label><input type="password" autoComplete="new-password" className="text-input" value={settings.two_pc_secret} onChange={e => updateField('two_pc_secret', e.target.value)} /></div>
+                    <div className="setting-item"><label>Prefer separate usable accounts</label><input type="checkbox" checked={settings.two_pc_prefer_separate} onChange={e => updateField('two_pc_prefer_separate', e.target.checked)} /></div>
+                    <div className="setting-item"><label>This PC wins an idle or simultaneous-start tie</label><input type="checkbox" checked={settings.two_pc_primary} onChange={e => updateField('two_pc_primary', e.target.checked)} /></div>
+                    <p className="setting-desc">Sharing is allowed when no other usable account is available. An offline peer releases its account preference. Explicit session routes remain in force. For shared OAuth credentials, use one token-authority server and one client; pairing only exchanges activity. Paired clients keep their own current account and contact upstream directly.</p>
+                </>}
 
                 <div className="setting-item">
                     <div className="setting-info">

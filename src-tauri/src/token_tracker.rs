@@ -164,6 +164,7 @@ impl TokenTracker {
 
     /// 记录一次请求的 usage
     pub fn record(&self, usage: RequestUsage) {
+        crate::two_pc::record(&usage.account_id);
         let pricing = get_pricing(&usage.model);
 
         let uncached_input = usage.input_tokens - usage.cached_input_tokens;

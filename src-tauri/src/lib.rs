@@ -24,6 +24,7 @@ pub mod relay_catalog;
 pub mod relay_translate;
 mod remote_client;
 mod remote_server;
+mod two_pc;
 mod scheduler;
 pub mod sentinel;
 mod session_affinity;
@@ -295,6 +296,9 @@ fn toggle_quota_overlay(app: tauri::AppHandle) -> Result<bool, String> {
     tray::toggle_quota_overlay(&app)
 }
 
+#[tauri::command]
+fn get_two_pc_status() -> two_pc::Status { two_pc::status() }
+
 /// 更新全局设置
 #[tauri::command]
 fn update_settings(
@@ -304,6 +308,14 @@ fn update_settings(
 ) -> Result<(), String> {
     if !matches!(settings.quota_widget_identity.as_str(), "number" | "emoji") {
         return Err("Quota widget identity must be number or emoji".to_string());
+    }
+    two_pc::validate(&settings)?;
+    if settings.two_pc_enabled {
+        settings.solo_auto_sync_current = false;
+        if settings.remote_mode == "client" {
+            settings.client_owns_current = true;
+            settings.client_direct_upstream = true;
+        }
     }
     // client 模式硬约束：本机不做保活（保活由 Server 负责）
     // quota_refresh_enabled 在 client 模式下被用作"Server 状态同步循环"的开关；
@@ -1756,6 +1768,9 @@ async fn push_solo_current_if_needed(state: tauri::State<'_, AppState>, new_id: 
             Err(_) => return,
         }
     };
+    if state.store.lock().map(|s| s.settings.two_pc_enabled).unwrap_or(false) {
+        return; // Each paired PC owns its current; never overwrite the other PC.
+    }
     // solo + client 都要 push（off / server 模式没 Server 可推）
     if !matches!(mode.as_str(), "solo" | "client") || secret.is_empty() {
         return;
@@ -2122,9 +2137,7 @@ fn switch_to_ready_plus_if_needed(
         if current_usable {
             return;
         }
-        let target = s
-            .accounts
-            .values()
+        let eligible = s.accounts.values()
             .filter(|a| Some(&a.id) != current_id.as_ref())
             .filter(|a| !a.is_banned && !a.is_token_invalid && !a.is_logged_out)
             .filter(|a| a.is_openai_account())
@@ -2135,6 +2148,10 @@ fn switch_to_ready_plus_if_needed(
                         && q.weekly_left > 0.0
                 })
             })
+            .collect::<Vec<_>>();
+        let has_unshared = eligible.iter().any(|a| !two_pc::reserved(&s, &a.id));
+        let target = eligible.into_iter()
+            .filter(|a| !has_unshared || !two_pc::reserved(&s, &a.id))
             .max_by_key(|a| a.cached_quota.as_ref().map(|q| q.updated_at));
         let target = match target {
             Some(a) => a,
@@ -3341,6 +3358,7 @@ pub fn score_candidate_accounts(store: &AccountStore) -> Vec<(String, String, f6
 
     // 按得分从高到低排序
     scored.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+    two_pc::prefer_separate(store, &mut scored);
     scored
 }
 
@@ -6357,6 +6375,8 @@ pub fn run() {
                 println!("[Scheduler] 后台刷新未开启，跳过启动");
             }
 
+            two_pc::start(state.store.clone(), app.handle().clone());
+
             // 启动本地代理（仅在设置开启时）
             let (proxy_enabled, proxy_port, proxy_allow_lan) = state
                 .store
@@ -6603,6 +6623,7 @@ pub fn run() {
             refresh_antigravity_quota,
             reload_ide_windows,
             get_settings,
+            get_two_pc_status,
             update_settings,
             disable_switcher_routing,
             get_proxy_status,
