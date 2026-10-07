@@ -6308,6 +6308,13 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .manage(AppState::new())
         .setup(|app| {
+            // Linux dock/task switchers need a native window icon as well as
+            // the tray icon and desktop entry, especially for direct launches.
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_icon(tauri::image::Image::from_bytes(include_bytes!(
+                    "../icons/128x128@2x.png"
+                ))?)?;
+            }
             // ── Deep link 监听：codexswitch:// + ccswitch:// ──
             // 收到 URL 后解析，把结果 emit 到前端"deep-link://import-pending"事件，
             // 由前端弹确认框，用户点"导入"才会调 add_relay_account 落库。

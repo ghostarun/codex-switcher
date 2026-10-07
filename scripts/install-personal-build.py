@@ -12,12 +12,40 @@ def write(path, data, mode=0o600):
     temp.chmod(mode)
     temp.replace(path)
 
+def install_icon(home):
+    icon=home/'.local/share/icons/codex-switcher-personal.png'
+    write(icon,(ROOT/'src-tauri/icons/128x128@2x.png').read_bytes(),0o644)
+    # Older desktop entries and GTK use the theme name rather than the absolute
+    # personal icon path. Supply both names so GNOME's cached entry also works.
+    for size,source in [(32,'32x32.png'),(128,'128x128.png'),(256,'128x128@2x.png')]:
+        for name in ['codex-switcher','codex-switcher-personal']:
+            write(home/f'.local/share/icons/hicolor/{size}x{size}/apps/{name}.png',
+                  (ROOT/'src-tauri/icons'/source).read_bytes(),0o644)
+    theme=home/'.local/share/icons/hicolor'
+    system_index=Path('/usr/share/icons/hicolor/index.theme')
+    if not (theme/'index.theme').exists() and system_index.exists():
+        write(theme/'index.theme',system_index.read_bytes(),0o644)
+    if shutil.which('gtk-update-icon-cache'):
+        subprocess.run(['gtk-update-icon-cache','-f','-t',str(theme)],check=False)
+    applications=home/'.local/share/applications'
+    entry='[Desktop Entry]\nType=Application\nName=Codex Switcher Personal\nExec="'+str(home/'.local/bin/codex-switcher')+'"\nTerminal=false\nCategories=Development;\nStartupWMClass=Codex-switcher\nIcon='+str(icon)+'\n'
+    write(applications/'codex-switcher.desktop',entry.encode(),0o644)
+    if shutil.which('update-desktop-database'):
+        subprocess.run(['update-desktop-database',str(applications)],check=False)
+    return icon
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--binary',type=Path,required=True)
-    p.add_argument('--peer-ip',choices=['100.104.44.67','100.95.7.78'],required=True)
-    p.add_argument('--secret-file',type=Path,required=True,help='same private pairing-secret file on both PCs; created if missing')
+    p.add_argument('--repair-icon',action='store_true',help='repair desktop/theme icons without changing or restarting the running proxy')
+    p.add_argument('--binary',type=Path)
+    p.add_argument('--peer-ip',choices=['100.104.44.67','100.95.7.78'])
+    p.add_argument('--secret-file',type=Path,help='same private pairing-secret file on both PCs; created if missing')
     a=p.parse_args()
+    if a.repair_icon:
+        print(f'Installed desktop/theme icon: {install_icon(Path.home())}')
+        return
+    if not all([a.binary,a.peer_ip,a.secret_file]):
+        p.error('--binary, --peer-ip and --secret-file are required for a build installation')
     if subprocess.run(['pgrep','-u',str(os.getuid()),'-x','codex-switcher'],capture_output=True).returncode==0:
         sys.exit('Switcher is still running. Hand off active work and quit it before installing; no processes were stopped.')
     ts=json.loads(subprocess.check_output(['tailscale','status','--json'],text=True,timeout=5))
@@ -64,11 +92,7 @@ def main():
             shutil.copy2(t3_launcher,t3_launcher.with_name('t3code.bak-switcher-'+stamp))
             t3_text=t3_text.replace('import os, pathlib, sys\n','import os, pathlib, sys\nos.environ.setdefault("T3CODE_SWITCHER_LAUNCHER", str(pathlib.Path.home() / ".local/bin/codex-switcher"))\nos.environ.setdefault("T3CODE_SWITCHER_BINARY", str(pathlib.Path.home() / "Applications/Codex-Switcher.AppDir/usr/bin/codex-switcher"))\n')
             write(t3_launcher,t3_text.encode(),0o755)
-    icon=home/'.local/share/icons/codex-switcher-personal.png'
-    write(icon,(ROOT/'src-tauri/icons/128x128@2x.png').read_bytes(),0o644)
-    applications=home/'.local/share/applications'
-    entry='[Desktop Entry]\nType=Application\nName=Codex Switcher Personal\nExec="'+str(home/'.local/bin/codex-switcher')+'"\nTerminal=false\nCategories=Development;\nStartupWMClass=Codex-switcher\nIcon='+str(icon)+'\n'
-    write(applications/'codex-switcher.desktop',entry.encode(),0o644)
+    install_icon(home)
     print(f'Installed Switcher {version}; paired with {a.peer_ip}. Start with codex-switcher after safe handoff.')
     print(f'Pairing secret is in {secret_file}; transfer this file privately to the other PC. It was not printed.')
 if __name__=='__main__':
