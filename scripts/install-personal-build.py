@@ -64,8 +64,10 @@ def main():
             shutil.copy2(t3_launcher,t3_launcher.with_name('t3code.bak-switcher-'+stamp))
             t3_text=t3_text.replace('import os, pathlib, sys\n','import os, pathlib, sys\nos.environ.setdefault("T3CODE_SWITCHER_LAUNCHER", str(pathlib.Path.home() / ".local/bin/codex-switcher"))\nos.environ.setdefault("T3CODE_SWITCHER_BINARY", str(pathlib.Path.home() / "Applications/Codex-Switcher.AppDir/usr/bin/codex-switcher"))\n')
             write(t3_launcher,t3_text.encode(),0o755)
+    icon=home/'.local/share/icons/codex-switcher-personal.png'
+    write(icon,(ROOT/'src-tauri/icons/128x128@2x.png').read_bytes(),0o644)
     applications=home/'.local/share/applications'
-    entry='[Desktop Entry]\nType=Application\nName=Codex Switcher Personal\nExec="'+str(home/'.local/bin/codex-switcher')+'"\nTerminal=false\nCategories=Development;\nIcon=utilities-terminal\n'
+    entry='[Desktop Entry]\nType=Application\nName=Codex Switcher Personal\nExec="'+str(home/'.local/bin/codex-switcher')+'"\nTerminal=false\nCategories=Development;\nStartupWMClass=Codex-switcher\nIcon='+str(icon)+'\n'
     write(applications/'codex-switcher.desktop',entry.encode(),0o644)
     print(f'Installed Switcher {version}; paired with {a.peer_ip}. Start with codex-switcher after safe handoff.')
     print(f'Pairing secret is in {secret_file}; transfer this file privately to the other PC. It was not printed.')
