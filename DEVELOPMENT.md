@@ -203,3 +203,16 @@ overrides to the existing personal launcher.
 DentoBot personal check: `python3 Workspace/scripts/personal-tools-check.py --latest`
 from the active DentoBot checkout. This checks only ThinkStation P3 and Linux
 Legion, never lab/robotics compatibility.
+
+## Claude quota display (0.7.17)
+
+Claude subscription usage appears below the Codex account list on Dashboard and
+Accounts. It reads the local Claude Code login (`CLAUDE_CONFIG_DIR` or
+`~/.claude/.credentials.json`) and uses the same read-only OAuth usage endpoint
+already used by `codex_switcher usage`. Tokens remain in the Rust backend; no
+Claude credentials are imported, switched, renewed or shared between PCs.
+Session, weekly and available model-specific windows show used/remaining
+percentages and local reset times. Missing quota is shown as unavailable.
+Responses/errors are cached for five minutes, with manual refresh limited to
+one request per 30 seconds. Expired login directs the user to Claude Code; a
+failed refresh labels any previous successful display explicitly.

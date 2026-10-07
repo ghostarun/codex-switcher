@@ -25,6 +25,7 @@ pub mod relay_translate;
 mod remote_client;
 mod remote_server;
 mod two_pc;
+mod claude_usage;
 mod scheduler;
 pub mod sentinel;
 mod session_affinity;
@@ -6624,6 +6625,7 @@ pub fn run() {
             reload_ide_windows,
             get_settings,
             get_two_pc_status,
+            claude_usage::get_claude_usage,
             update_settings,
             disable_switcher_routing,
             get_proxy_status,

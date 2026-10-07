@@ -20,6 +20,7 @@ import CachePanel from './components/CachePanel';
 import { ConfirmModal } from './components/ConfirmModal';
 import { RelayImportConfirm } from './components/RelayImportConfirm';
 import './App.css';
+import { ClaudeUsage } from './components/ClaudeUsage';
 import { TwoPcActivity } from './components/TwoPcActivity';
 
 type PageType = 'dashboard' | 'accounts' | 'proxy' | 'routes' | 'stats' | 'cache' | 'skills' | 'settings';
@@ -427,6 +428,7 @@ function App() {
       <main className="app-main">
         <TwoPcActivity />
         {currentPage === 'dashboard' ? (
+          <>
           <Dashboard
             accounts={accounts}
             currentAccount={currentAccount}
@@ -469,7 +471,10 @@ function App() {
               }
             }}
           />
+          <ClaudeUsage />
+          </>
         ) : currentPage === 'accounts' ? (
+          <>
           <AccountList
             accounts={accounts}
             currentId={currentId}
@@ -484,6 +489,8 @@ function App() {
             onRefreshUsage={refreshUsage}
             usageLoading={usageLoading}
           />
+          <ClaudeUsage />
+          </>
         ) : currentPage === 'proxy' ? (
           <Proxy />
         ) : currentPage === 'routes' ? (
