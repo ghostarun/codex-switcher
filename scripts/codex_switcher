@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""codex_switcher usage — show 5h/weekly limits for all Codex accounts + Claude.
+"""codex_switcher usage | active — show 5h/weekly limits for all Codex accounts + Claude.
 
 Read-only: Codex limits are fetched live from chatgpt.com (wham/usage) using the
 account tokens in ~/.codex-switcher/accounts.json (--cached uses the app's cache); Claude data comes from the
@@ -122,9 +122,56 @@ def claude():
         if w and w.get("utilization") is not None:
             print(row(label, w["utilization"], ts(w)))
 
+def tail_json(path, n=1, chunk=65536):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2); f.seek(max(0, f.tell() - chunk))
+            lines = f.read().decode(errors="ignore").splitlines()[-n:]
+        return [json.loads(l) for l in lines if l.startswith("{")]
+    except Exception:
+        return []
+
+def ago(iso):
+    t = datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", iso).replace("Z", "+00:00"))
+    return fmt_dur((datetime.now(timezone.utc) - t).total_seconds()) + " ago"
+
+def active():
+    import socket, subprocess
+    d = json.load(open(CS))
+    accts = d.get("accounts", [])
+    accts = list(accts.values() if isinstance(accts, dict) else accts)
+    by_id = {a["id"]: a for a in accts}
+    running = subprocess.run(["pgrep", "-f", "codex-switcher$"], capture_output=True).returncode == 0
+    try:
+        socket.create_connection(("127.0.0.1", 18080), 1).close(); proxy = True
+    except Exception:
+        proxy = False
+    print(col("Codex Switcher", "1") + f"  app {'running' if running else col('NOT running', '31')}, proxy :18080 {'up' if proxy else col('DOWN', '31')}")
+    last = (tail_json(os.path.expanduser("~/.codex-switcher/token-history.jsonl")) or [None])[-1]
+    cur = by_id.get(d.get("current"))
+    if last and last["account_id"] in by_id:
+        a = by_id[last["account_id"]]
+        print(f"  In use now:  {col(a['name'], '1;32')}  (last request {ago(last['timestamp'])}, {last['model']})")
+        if cur and cur["id"] != a["id"]:
+            print(f"  Selected next: {cur['name']}  (app switched since that request)")
+    elif cur:
+        print(f"  Selected:    {col(cur['name'], '1;32')}  (no requests recorded yet)")
+    sw = (tail_json(os.path.expanduser("~/.codex-switcher/switch-history.jsonl")) or [None])[-1]
+    if sw:
+        print(f"  Last switch: {sw['from_account']} -> {sw['to_account']}  ({sw['reason']}, {ago(sw['timestamp'])})")
+    a = by_id.get((last or {}).get("account_id")) or cur
+    if a:
+        q, err = live_codex(a)
+        q = q or a.get("cached_quota") or {}
+        if q.get("five_hour_left") is not None:
+            print(row("5h", 100 - q["five_hour_left"], q.get("five_hour_reset_at")))
+            print(row("weekly", 100 - q["weekly_left"], q.get("weekly_reset_at")))
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "active":
+        active(); return
     if len(sys.argv) < 2 or sys.argv[1] != "usage":
-        print("usage: codex_switcher usage [--cached]"); sys.exit(2)
+        print("usage: codex_switcher usage [--cached] | active"); sys.exit(2)
     codex("--cached" not in sys.argv); print(); claude()
 
 main()
