@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """codex_switcher usage — show 5h/weekly limits for all Codex accounts + Claude.
 
-Read-only: Codex data comes from the cached quota in ~/.codex-switcher/accounts.json
-(kept fresh by the running Codex Switcher app); Claude data comes from the
+Read-only: Codex limits are fetched live from chatgpt.com (wham/usage) using the
+account tokens in ~/.codex-switcher/accounts.json (--cached uses the app's cache); Claude data comes from the
 Anthropic OAuth usage endpoint using the token in ~/.claude/.credentials.json.
 Tokens are never refreshed or written.
 """
 import json, os, re, sys, time, urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 CS = os.path.expanduser("~/.codex-switcher/accounts.json")
@@ -31,7 +32,35 @@ def row(label, used, reset_ts):
     rst = f"resets in {fmt_dur(reset_ts - time.time())}" if reset_ts else ""
     return f"    {label:<7}{bar(used)}  {rst}"
 
-def codex():
+def live_codex(a):
+    """Fetch live limits for one account; returns (quota_dict, error_str)."""
+    t = (a.get("auth_json") or {}).get("tokens") or {}
+    if not t.get("access_token"):
+        return None, "no token"
+    h = {"Authorization": "Bearer " + t["access_token"], "Accept": "application/json",
+         "User-Agent": "codex_cli_rs/0.50.0", "originator": "codex_cli_rs"}
+    if t.get("account_id"): h["ChatGPT-Account-Id"] = t["account_id"]
+    err = None
+    for i in range(3):
+        try:
+            j = json.load(urllib.request.urlopen(urllib.request.Request(
+                "https://chatgpt.com/backend-api/wham/usage", headers=h), timeout=12))
+            rl = j.get("rate_limit") or {}
+            p, w = rl.get("primary_window") or {}, rl.get("secondary_window") or {}
+            def at(x):
+                return x.get("reset_at") or (time.time() + x["reset_after_seconds"] if x.get("reset_after_seconds") is not None else None)
+            return {"five_hour_left": 100 - p.get("used_percent", 0), "five_hour_reset_at": at(p),
+                    "weekly_left": 100 - w.get("used_percent", 0), "weekly_reset_at": at(w),
+                    "plan_type": j.get("plan_type", "?")}, None
+        except urllib.error.HTTPError as e:
+            err = f"HTTP {e.code}"
+            if e.code in (401, 403): break
+        except Exception as e:
+            err = str(e)[:40]
+        time.sleep(1 << i)
+    return None, err
+
+def codex(live=True):
     try:
         d = json.load(open(CS))
     except Exception as e:
@@ -39,9 +68,19 @@ def codex():
     cur = d.get("current")
     print(col("Codex accounts", "1"))
     accts = d.get("accounts", [])
-    for a in (accts.values() if isinstance(accts, dict) else accts):
+    accts = list(accts.values() if isinstance(accts, dict) else accts)
+    fresh = {}
+    if live:
+        with ThreadPoolExecutor(8) as ex:
+            fresh = dict(zip([a.get("id") for a in accts], ex.map(live_codex, accts)))
+    for a in accts:
         q = a.get("cached_quota") or {}
         flags = []
+        lq, lerr = fresh.get(a.get("id"), (None, None))
+        if lq:
+            q = {**q, **lq, "updated_at": None}
+        elif live:
+            flags.append(f"live failed: {lerr}, showing cached")
         if a.get("id") == cur: flags.append("active")
         if a.get("is_banned"): flags.append("BANNED")
         if a.get("is_token_invalid") or a.get("is_logged_out"): flags.append("needs login")
@@ -85,7 +124,7 @@ def claude():
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] != "usage":
-        print("usage: codex_switcher usage"); sys.exit(2)
-    codex(); print(); claude()
+        print("usage: codex_switcher usage [--cached]"); sys.exit(2)
+    codex("--cached" not in sys.argv); print(); claude()
 
 main()
